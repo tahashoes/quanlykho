@@ -91,7 +91,51 @@ function metric(label, value, note, accent = false) {
   return `<article class="metric${accent ? " teal" : ""}"><span class="metric-label">${text(label)}</span><strong>${text(value)}</strong><small>${text(note)}</small></article>`;
 }
 
-function rankedChart(items, options) {
+const chartColors = ["#ee1b24", "#0f766e", "#f59e0b", "#2563eb", "#8b5cf6", "#db2777"];
+
+function donutChart(items, options) {
+  const rows = items.map((item) => ({
+    item,
+    value: Math.max(0, Number(options.value(item)) || 0)
+  }));
+  const total = rows.reduce((sum, row) => sum + row.value, 0);
+  if (!rows.length || total === 0) {
+    return `<p class="chart-empty">${text(options.emptyMessage)}</p>`;
+  }
+  const maximum = Math.max(...rows.map((row) => row.value));
+  const minimum = Math.min(...rows.map((row) => row.value));
+  let offset = 0;
+  const segments = rows.map((row, index) => {
+    if (row.value === 0) return "";
+    const percentage = (row.value / total) * 100;
+    const segment = `<circle class="donut-segment" cx="21" cy="21" r="15.9155" fill="none" stroke="${chartColors[index % chartColors.length]}" stroke-width="6.5" stroke-dasharray="${percentage.toFixed(3)} ${(100 - percentage).toFixed(3)}" stroke-dashoffset="${(-offset).toFixed(3)}"><title>${text(options.label(row.item))}: ${text(options.formatValue(row.value))}</title></circle>`;
+    offset += percentage;
+    return segment;
+  }).join("");
+  const legend = rows.map((row, index) => {
+    const isBest = row.value === maximum;
+    const isLeast = minimum !== maximum && row.value === minimum;
+    const stateLabel = isBest ? "Nhiều nhất" : isLeast ? "Ít nhất" : "";
+    return `<div class="donut-legend-item">
+      <span class="donut-swatch" style="--segment-color:${chartColors[index % chartColors.length]}"></span>
+      <span class="donut-legend-name"><strong>${text(options.label(row.item))}</strong><small>${text(options.detail(row.item))}</small></span>
+      <span class="donut-legend-value">${text(options.formatValue(row.value))}${stateLabel ? `<small>${stateLabel}</small>` : ""}</span>
+    </div>`;
+  }).join("");
+  return `<div class="donut-layout" role="img" aria-label="${text(options.ariaLabel)}">
+    <div class="donut-visual">
+      <svg class="donut-svg" viewBox="0 0 42 42" aria-hidden="true">
+        <circle class="donut-base" cx="21" cy="21" r="15.9155" fill="none" stroke-width="6.5"></circle>
+        ${segments}
+        <text class="donut-total" x="21" y="20.2" text-anchor="middle">${total.toLocaleString("vi-VN")}</text>
+        <text class="donut-caption" x="21" y="24.5" text-anchor="middle">đơn hàng</text>
+      </svg>
+    </div>
+    <div class="donut-legend">${legend}</div>
+  </div>`;
+}
+
+function columnChart(items, options) {
   const rows = items.map((item) => ({
     item,
     value: Math.max(0, Number(options.value(item)) || 0)
@@ -100,23 +144,17 @@ function rankedChart(items, options) {
   if (!rows.length || maximum === 0) {
     return `<p class="chart-empty">${text(options.emptyMessage)}</p>`;
   }
-  const minimum = Math.min(...rows.map((row) => row.value));
-  return rows.map((row, index) => {
-    const width = row.value === 0 ? 0 : Math.max(4, Math.round((row.value / maximum) * 100));
-    const isBest = Boolean(options.highlightExtremes) && row.value === maximum;
-    const isLeast = Boolean(options.highlightExtremes) && minimum !== maximum && row.value === minimum;
-    const stateClass = isBest ? " best" : isLeast ? " least" : "";
-    const stateLabel = isBest ? "Nhiều nhất" : isLeast ? "Ít nhất" : "";
-    return `<div class="ranked-item${stateClass}">
-      <div class="ranked-head">
-        <span class="ranked-position">${index + 1}</span>
-        <span class="ranked-name"><strong>${text(options.label(row.item))}</strong><small>${text(options.detail(row.item))}</small></span>
-        <span class="ranked-value">${text(options.formatValue(row.value))}</span>
-      </div>
-      <div class="ranked-track" aria-hidden="true"><span class="ranked-fill" style="width:${width}%"></span></div>
-      ${stateLabel ? `<span class="ranked-state">${stateLabel}</span>` : ""}
+  const columns = rows.map((row, index) => {
+    const height = row.value === 0 ? 0 : Math.max(8, Math.round((row.value / maximum) * 100));
+    const color = chartColors[index % chartColors.length];
+    return `<div class="column-item">
+      <span class="column-value">${text(options.formatValue(row.value))}</span>
+      <div class="column-track" aria-hidden="true"><span class="column-bar" style="height:${height}%;background:${color}"></span></div>
+      <strong title="${text(options.label(row.item))}">${text(options.label(row.item))}</strong>
+      <small>${text(options.detail(row.item))}</small>
     </div>`;
   }).join("");
+  return `<div class="column-chart" style="--column-count:${rows.length}" role="img" aria-label="${text(options.ariaLabel)}">${columns}</div>`;
 }
 
 function showLogin() {
@@ -155,29 +193,29 @@ function renderDashboard() {
     soldProducts: [],
     inventoryProducts: []
   };
-  $("#dashboard-channel-chart").innerHTML = rankedChart(rankings.channels, {
+  $("#dashboard-channel-chart").innerHTML = donutChart(rankings.channels, {
     value: (item) => item.orders,
     label: (item) => channelLabels[item.channel] || item.channel,
     detail: (item) => `${item.units.toLocaleString("vi-VN")} sản phẩm`,
     formatValue: (value) => `${value.toLocaleString("vi-VN")} đơn`,
     emptyMessage: "Chưa có đơn hàng để xếp hạng.",
-    highlightExtremes: true
+    ariaLabel: "Biểu đồ tròn tỷ trọng số đơn theo kênh bán toàn thời gian"
   });
-  $("#dashboard-product-chart").innerHTML = rankedChart(rankings.soldProducts, {
+  $("#dashboard-product-chart").innerHTML = columnChart(rankings.soldProducts, {
     value: (item) => item.units,
     label: (item) => item.name,
     detail: (item) => `${item.code} · ${item.orders.toLocaleString("vi-VN")} đơn`,
     formatValue: (value) => `${value.toLocaleString("vi-VN")} SP`,
     emptyMessage: "Chưa có sản phẩm bán ra.",
-    highlightExtremes: false
+    ariaLabel: "Biểu đồ cột sản phẩm bán ra nhiều nhất toàn thời gian"
   });
-  $("#dashboard-inventory-chart").innerHTML = rankedChart(rankings.inventoryProducts, {
+  $("#dashboard-inventory-chart").innerHTML = columnChart(rankings.inventoryProducts, {
     value: (item) => item.stock,
     label: (item) => item.name,
     detail: (item) => item.code,
     formatValue: (value) => `${value.toLocaleString("vi-VN")} tồn`,
     emptyMessage: "Kho hiện chưa có sản phẩm.",
-    highlightExtremes: false
+    ariaLabel: "Biểu đồ cột sản phẩm tồn kho nhiều nhất"
   });
 
   const lowProducts = state.products
@@ -243,21 +281,21 @@ function renderReport() {
   const channelRanking = report.channels.filter((item) => item.channel !== "unknown").sort(
     (left, right) => right.orders - left.orders || right.units - left.units
   );
-  $("#report-channel-chart").innerHTML = rankedChart(channelRanking, {
+  $("#report-channel-chart").innerHTML = donutChart(channelRanking, {
     value: (item) => item.orders,
     label: (item) => channelLabels[item.channel] || item.channel,
     detail: (item) => `${item.units.toLocaleString("vi-VN")} sản phẩm · ${money.format(item.revenue)}`,
     formatValue: (value) => `${value.toLocaleString("vi-VN")} đơn`,
     emptyMessage: "Chưa có đơn hàng trong khoảng thời gian này.",
-    highlightExtremes: true
+    ariaLabel: "Biểu đồ tròn tỷ trọng số đơn theo kênh bán trong kỳ báo cáo"
   });
-  $("#report-product-chart").innerHTML = rankedChart((report.products || []).slice(0, 5), {
+  $("#report-product-chart").innerHTML = columnChart((report.products || []).slice(0, 5), {
     value: (item) => item.units,
     label: (item) => item.name,
     detail: (item) => `${item.code} · ${money.format(item.revenue)}`,
     formatValue: (value) => `${value.toLocaleString("vi-VN")} SP`,
     emptyMessage: "Chưa có sản phẩm bán ra trong khoảng thời gian này.",
-    highlightExtremes: false
+    ariaLabel: "Biểu đồ cột sản phẩm bán nhiều nhất trong kỳ báo cáo"
   });
   const channelRows = report.channels.map((item) => `<tr><td><span class="channel-chip">${text(channelLabels[item.channel] || item.channel)}</span></td><td>${item.orders.toLocaleString("vi-VN")}</td><td>${item.units.toLocaleString("vi-VN")}</td><td>${money.format(item.revenue)}</td><td>${money.format(item.profit)}</td></tr>`).join("");
   $("#channel-table").innerHTML = `${channelRows}<tr class="channel-total"><td>TỔNG TẤT CẢ KÊNH</td><td>${report.totals.orders.toLocaleString("vi-VN")}</td><td>${report.totals.units.toLocaleString("vi-VN")}</td><td>${money.format(report.totals.revenue)}</td><td>${money.format(report.totals.profit)}</td></tr>`;

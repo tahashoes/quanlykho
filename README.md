@@ -16,8 +16,8 @@
   - số đơn hàng bán ra;
   - tổng số lượng sản phẩm bán ra;
   - thống kê riêng từng kênh và tổng tất cả các kênh.
-- Biểu đồ báo cáo xếp hạng kênh bán nhiều nhất, ít nhất và các sản phẩm bán chạy nhất trong kỳ.
-- Biểu đồ tổng quan toàn thời gian cho kênh nhiều đơn nhất, sản phẩm bán nhiều nhất và sản phẩm tồn kho nhiều nhất.
+- Biểu đồ tròn trong Báo cáo thể hiện tỷ trọng kênh bán nhiều nhất, ít nhất trong kỳ; biểu đồ cột xếp hạng các sản phẩm bán chạy.
+- Biểu đồ tròn và biểu đồ cột ở Tổng quan thống kê kênh nhiều đơn nhất, sản phẩm bán nhiều nhất và sản phẩm tồn kho nhiều nhất.
 - Đăng nhập bằng số điện thoại và mật khẩu, có kiểm tra định dạng và nút hiện/ẩn mật khẩu.
 - Admin có thể thêm, sửa và xóa tối đa 5 tài khoản quản lý; tên, số điện thoại và mật khẩu là bắt buộc khi tạo mới.
 - Số điện thoại quản lý phải có đúng 10 số, bắt đầu bằng số 0; mật khẩu tối thiểu 6 ký tự và có ít nhất một ký tự đặc biệt.

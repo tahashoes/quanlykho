@@ -1,0 +1,14 @@
+services:
+  quanlykho:
+    build: .
+    container_name: quanlykho
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      PORT: "3000"
+      DB_PATH: /app/data/quanlykho.db
+      # Đổi chuỗi này trước khi triển khai thật, sau đó nhập cùng mã trong nút "Thiết lập bảo mật".
+      INVENTORY_API_TOKEN: "doi-ma-bao-ve-cua-ban"
+    volumes:
+      - ./data:/app/data

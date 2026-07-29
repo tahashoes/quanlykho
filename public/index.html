@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#0f766e" />
+    <title>Kho Hàng | Quản lý kho</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <a class="brand" href="#dashboard" aria-label="Kho Hàng">
+          <span class="brand-mark">K</span>
+          <span>Kho Hàng<small>Quản lý thông minh</small></span>
+        </a>
+        <nav class="nav" aria-label="Điều hướng chính">
+          <button class="nav-link active" data-view="dashboard">Tổng quan</button>
+          <button class="nav-link" data-view="goods">Nhập hàng</button>
+          <button class="nav-link" data-view="sales">Xuất hàng</button>
+          <button class="nav-link" data-view="inventory">Tồn kho</button>
+          <button class="nav-link" data-view="reports">Báo cáo</button>
+        </nav>
+        <div class="sidebar-footer">Dữ liệu được lưu an toàn trên máy chủ của bạn.</div>
+      </aside>
+
+      <main class="main-content">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow" id="today"></p>
+            <h1 id="page-title">Tổng quan kho hàng</h1>
+          </div>
+          <button class="button button-ghost" id="open-settings">Thiết lập bảo mật</button>
+        </header>
+
+        <section class="view active" id="dashboard-view">
+          <div class="metric-grid" id="dashboard-metrics"></div>
+          <div class="content-grid dashboard-grid">
+            <article class="card">
+              <div class="card-heading"><div><p class="eyebrow">Cảnh báo</p><h2>Sản phẩm sắp hết</h2></div><button class="text-button" data-go="inventory">Xem tồn kho</button></div>
+              <div id="low-stock" class="compact-list"></div>
+            </article>
+            <article class="card">
+              <div class="card-heading"><div><p class="eyebrow">Nhật ký</p><h2>Giao dịch gần đây</h2></div><button class="text-button" data-go="reports">Xem báo cáo</button></div>
+              <div id="recent-transactions" class="compact-list"></div>
+            </article>
+          </div>
+        </section>
+
+        <section class="view" id="goods-view">
+          <div class="content-grid form-grid">
+            <article class="card"><div class="card-heading"><div><p class="eyebrow">Sản phẩm mới</p><h2>Thêm hàng hóa</h2></div></div>
+              <form id="new-product-form" class="form-grid-inner">
+                <label>Mã sản phẩm<input required name="code" placeholder="VD: SP-001" maxlength="50" /></label>
+                <label>Tên sản phẩm<input required name="name" placeholder="VD: Áo thun basic" maxlength="160" /></label>
+                <label>Số lượng nhập<input required name="quantity" type="number" min="1" step="1" placeholder="0" /></label>
+                <label>Đơn giá nhập<input required name="costPrice" type="number" min="0" step="1000" placeholder="0" /></label>
+                <label>Giá bán<input required name="salePrice" type="number" min="0" step="1000" placeholder="0" /></label>
+                <button class="button button-primary" type="submit">Lưu hàng hóa</button>
+              </form>
+            </article>
+            <article class="card"><div class="card-heading"><div><p class="eyebrow">Bổ sung tồn</p><h2>Nhập thêm hàng</h2></div></div>
+              <form id="receive-form" class="form-grid-inner">
+                <label>Mã sản phẩm<input required name="code" list="product-codes" placeholder="Chọn hoặc nhập mã" /></label>
+                <label>Tên sản phẩm<input name="name" readonly placeholder="Tự hiển thị theo mã" /></label>
+                <label>Số lượng nhập<input required name="quantity" type="number" min="1" step="1" placeholder="0" /></label>
+                <label>Đơn giá nhập<input required name="costPrice" type="number" min="0" step="1000" placeholder="0" /></label>
+                <label>Giá bán mới <span class="optional">(không bắt buộc)</span><input name="salePrice" type="number" min="0" step="1000" placeholder="Giữ nguyên giá hiện tại" /></label>
+                <button class="button button-primary" type="submit">Xác nhận nhập</button>
+              </form>
+            </article>
+          </div>
+        </section>
+
+        <section class="view" id="sales-view">
+          <div class="content-grid form-grid">
+            <article class="card"><div class="card-heading"><div><p class="eyebrow">Bán hàng</p><h2>Xuất hàng khỏi kho</h2></div></div>
+              <form id="sale-form" class="form-grid-inner">
+                <label>Mã sản phẩm<input required name="code" list="product-codes" placeholder="Chọn hoặc nhập mã" /></label>
+                <label>Tên sản phẩm<input name="name" readonly placeholder="Tự hiển thị theo mã" /></label>
+                <label>Số lượng xuất<input required name="quantity" type="number" min="1" step="1" placeholder="0" /></label>
+                <label>Giá bán<input required name="salePrice" type="number" min="0" step="1000" placeholder="0" /></label>
+                <p class="form-help" id="sale-stock-hint">Chọn mã sản phẩm để xem số lượng tồn.</p>
+                <button class="button button-primary" type="submit">Xác nhận xuất hàng</button>
+              </form>
+            </article>
+            <article class="card sales-note">
+              <p class="eyebrow">Tự động cập nhật</p><h2>Tồn kho luôn chính xác</h2>
+              <p>Sau khi xuất hàng, số lượng tồn sẽ giảm ngay lập tức. Hệ thống chặn thao tác xuất vượt quá số lượng còn lại.</p>
+              <div class="info-strip"><span>✓</span><span>Giá vốn được ghi nhận tại thời điểm xuất để báo cáo lợi nhuận chính xác.</span></div>
+            </article>
+          </div>
+        </section>
+
+        <section class="view" id="inventory-view">
+          <article class="card full-card">
+            <div class="card-heading inventory-header"><div><p class="eyebrow">Danh mục sản phẩm</p><h2>Quản lý tồn kho</h2></div><label class="search"><span>Tìm kiếm</span><input id="product-search" placeholder="Mã hoặc tên sản phẩm" /></label></div>
+            <div class="table-wrap"><table><thead><tr><th>Mã sản phẩm</th><th>Tên sản phẩm</th><th>Tồn kho</th><th>Giá nhập TB</th><th>Giá bán</th><th>Giá trị tồn</th><th>Cập nhật</th></tr></thead><tbody id="product-table"></tbody></table></div>
+          </article>
+        </section>
+
+        <section class="view" id="reports-view">
+          <div class="metric-grid report-metrics" id="report-metrics"></div>
+          <article class="card full-card"><div class="card-heading"><div><p class="eyebrow">100 giao dịch mới nhất</p><h2>Chi tiết nhập – xuất</h2></div></div>
+            <div class="table-wrap"><table><thead><tr><th>Thời gian</th><th>Loại</th><th>Mã sản phẩm</th><th>Tên sản phẩm</th><th>Số lượng</th><th>Đơn giá</th><th>Thành tiền</th></tr></thead><tbody id="transaction-table"></tbody></table></div>
+          </article>
+        </section>
+      </main>
+    </div>
+    <datalist id="product-codes"></datalist>
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <dialog id="settings-dialog"><form method="dialog" class="settings-form"><div class="card-heading"><div><p class="eyebrow">Bảo mật truy cập</p><h2>Mã bảo vệ API</h2></div><button class="icon-button" value="cancel" aria-label="Đóng">×</button></div><p>Nếu máy chủ đã đặt mã bảo vệ, nhập mã ở đây. Mã chỉ được lưu trên trình duyệt này.</p><label>Mã bảo vệ<input id="api-token" type="password" autocomplete="off" placeholder="Nhập mã nếu được yêu cầu" /></label><div class="dialog-actions"><button class="button button-ghost" value="cancel">Hủy</button><button class="button button-primary" id="save-token" value="default">Lưu và tải lại</button></div></form></dialog>
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

@@ -64,6 +64,24 @@ h1, h2, p, blockquote { margin: 0; }
   font-weight: 700;
 }
 .login-form .button { margin-top: 5px; }
+.password-field { position: relative; display: block; }
+.password-field input { padding-right: 44px; }
+.password-toggle {
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  width: 32px;
+  height: 32px;
+  transform: translateY(-50%);
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: #738287;
+  font-size: 17px;
+}
+.password-toggle:hover { background: #eef4f3; color: var(--teal); }
+.password-toggle.active { color: var(--teal); }
+.form-error { color: var(--red); font-size: 12px; line-height: 1.45; }
 .login-footnote { margin-top: 22px; color: #879397; text-align: center; font-size: 11px; line-height: 1.5; }
 .login-visual {
   position: relative;
@@ -175,6 +193,25 @@ input[readonly] { background: #f5f8f8; color: #66777b; }
 input[type="file"] { padding: 7px; font-size: 12px; }
 .form-grid-inner .button { grid-column: 1 / -1; justify-self: start; margin-top: 3px; }
 .form-help { grid-column: 1 / -1; margin: -5px 0 0; color: var(--muted); font-size: 12px; }
+.input-with-action { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 7px; }
+.inline-button { border: 1px solid #b9cbcc; border-radius: 8px; padding: 0 11px; background: #f4f8f7; color: var(--teal); font-size: 12px; font-weight: 750; }
+.inline-button:hover { border-color: var(--teal); background: var(--teal-pale); }
+.selected-product {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 11px;
+  border: 1px solid #dce7e6;
+  border-radius: 10px;
+  background: #f8fbfa;
+}
+.selected-product-visual { width: 52px; height: 52px; flex: 0 0 52px; }
+.selected-product-visual img,
+.selected-product-visual .product-placeholder { width: 52px; height: 52px; border-radius: 9px; object-fit: cover; }
+.selected-product strong, .selected-product small { display: block; }
+.selected-product strong { font-size: 14px; }
+.selected-product small { margin-top: 4px; color: var(--muted); font-size: 12px; }
 .image-field { grid-column: 1 / -1; }
 .image-preview { grid-column: 1 / -1; display: flex; align-items: center; gap: 14px; padding: 12px; border: 1px dashed #b9cbcc; border-radius: 10px; background: #f8fbfa; }
 .image-preview img { width: 74px; height: 74px; border-radius: 9px; object-fit: cover; background: #edf1f1; }

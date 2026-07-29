@@ -95,14 +95,16 @@ function showLogin() {
   $("#login-screen").classList.remove("hidden");
   $("#app-shell").classList.add("hidden");
   $("#login-form").elements.password.value = "";
+  $("#login-error").classList.add("hidden");
+  $("#login-error").textContent = "";
 }
 
 function showApp(user) {
   state.currentUser = user;
   $("#login-screen").classList.add("hidden");
   $("#app-shell").classList.remove("hidden");
-  $("#current-phone").textContent = user.phone;
-  $("#current-role").textContent = user.role === "admin" ? "Quản trị viên" : "Quản lý";
+  $("#current-phone").textContent = user.name;
+  $("#current-role").textContent = `${user.role === "admin" ? "Quản trị viên" : "Quản lý"} · ${user.phone}`;
   $(".user-avatar").textContent = user.role === "admin" ? "A" : "Q";
   document.querySelectorAll(".admin-only").forEach((element) => {
     element.classList.toggle("hidden", user.role !== "admin");
@@ -131,7 +133,7 @@ function renderDashboard() {
     ? report.recent.map((item) => {
       const details = item.kind === "IN"
         ? "Nhập hàng"
-        : `Xuất hàng · ${channelLabels[item.channel] || "Chưa xác định"}`;
+        : `Xuất hàng · ${item.orderCode || "Chưa có mã đơn"} · ${channelLabels[item.channel] || "Chưa xác định"}`;
       return `<div class="compact-row"><span class="row-icon ${item.kind === "OUT" ? "out" : ""}">${item.kind === "IN" ? "+" : "−"}</span><div class="row-copy"><strong>${text(item.name)}</strong><small>${details} · ${dateTime.format(new Date(item.createdAt))}</small></div><div class="row-value">${item.kind === "IN" ? "+" : "−"}${item.quantity}<small>${money.format(item.quantity * item.unitPrice)}</small></div></div>`;
     }).join("")
     : `<p class="empty">Chưa có giao dịch nào.</p>`;
@@ -169,15 +171,15 @@ function renderReport() {
   const channelRows = report.channels.map((item) => `<tr><td><span class="channel-chip">${text(channelLabels[item.channel] || item.channel)}</span></td><td>${item.orders.toLocaleString("vi-VN")}</td><td>${item.units.toLocaleString("vi-VN")}</td><td>${money.format(item.revenue)}</td><td>${money.format(item.profit)}</td></tr>`).join("");
   $("#channel-table").innerHTML = `${channelRows}<tr class="channel-total"><td>TỔNG TẤT CẢ KÊNH</td><td>${report.totals.orders.toLocaleString("vi-VN")}</td><td>${report.totals.units.toLocaleString("vi-VN")}</td><td>${money.format(report.totals.revenue)}</td><td>${money.format(report.totals.profit)}</td></tr>`;
   $("#transaction-table").innerHTML = report.transactions.length
-    ? report.transactions.map((item) => `<tr><td class="muted">${dateTime.format(new Date(item.createdAt))}</td><td><span class="channel-chip">${text(channelLabels[item.channel] || "Chưa xác định")}</span></td><td>${text(item.code)}</td><td class="product-name">${text(item.name)}</td><td>${item.quantity}</td><td>${money.format(item.unitPrice)}</td><td>${money.format(item.quantity * item.unitPrice)}</td></tr>`).join("")
-    : `<tr><td colspan="7" class="empty">Không có đơn hàng trong khoảng thời gian này.</td></tr>`;
+    ? report.transactions.map((item) => `<tr><td class="muted">${dateTime.format(new Date(item.createdAt))}</td><td class="product-name">${text(item.orderCode || "—")}</td><td><span class="channel-chip">${text(channelLabels[item.channel] || "Chưa xác định")}</span></td><td>${text(item.code)}</td><td class="product-name">${text(item.name)}</td><td>${item.quantity}</td><td>${money.format(item.unitPrice)}</td><td>${money.format(item.quantity * item.unitPrice)}</td></tr>`).join("")
+    : `<tr><td colspan="8" class="empty">Không có đơn hàng trong khoảng thời gian này.</td></tr>`;
 }
 
 function renderManagers() {
   $("#manager-limit").textContent = `${state.managers.length}/5`;
   $("#manager-table").innerHTML = state.managers.length
-    ? state.managers.map((manager) => `<tr><td class="product-name">${text(manager.phone)}</td><td><span class="role-chip">Quản lý</span></td><td class="muted">${dateTime.format(new Date(manager.createdAt))}</td><td class="muted">${dateTime.format(new Date(manager.updatedAt))}</td><td><div class="action-buttons"><button class="mini-button" data-manager-action="edit" data-id="${manager.id}">Sửa</button><button class="mini-button danger" data-manager-action="delete" data-id="${manager.id}">Xóa</button></div></td></tr>`).join("")
-    : `<tr><td colspan="5" class="empty">Chưa có tài khoản quản lý.</td></tr>`;
+    ? state.managers.map((manager) => `<tr><td class="product-name">${text(manager.name)}</td><td>${text(manager.phone)}</td><td><span class="role-chip">Quản lý</span></td><td class="muted">${dateTime.format(new Date(manager.createdAt))}</td><td class="muted">${dateTime.format(new Date(manager.updatedAt))}</td><td><div class="action-buttons"><button class="mini-button" data-manager-action="edit" data-id="${manager.id}">Sửa</button><button class="mini-button danger" data-manager-action="delete" data-id="${manager.id}">Xóa</button></div></td></tr>`).join("")
+    : `<tr><td colspan="6" class="empty">Chưa có tài khoản quản lý.</td></tr>`;
 }
 
 function findProduct(code) {
@@ -196,6 +198,24 @@ function fillProductFields(form, showStock = false) {
     $("#sale-stock-hint").textContent = product
       ? `Hiện còn ${product.stock} đơn vị · giá bán gợi ý ${money.format(product.salePrice)}.`
       : "Không tìm thấy sản phẩm theo mã đã nhập.";
+    const preview = $("#selected-sale-product");
+    const previewImage = preview.querySelector("img");
+    const placeholder = preview.querySelector(".product-placeholder");
+    preview.classList.toggle("hidden", !product);
+    if (product) {
+      preview.querySelector("strong").textContent = product.name;
+      preview.querySelector("small").textContent = `${product.code} · còn ${product.stock} sản phẩm`;
+      if (product.image) {
+        previewImage.src = product.image;
+        previewImage.classList.remove("hidden");
+        placeholder.classList.add("hidden");
+      } else {
+        previewImage.removeAttribute("src");
+        previewImage.classList.add("hidden");
+        placeholder.textContent = product.name.slice(0, 1).toUpperCase();
+        placeholder.classList.remove("hidden");
+      }
+    }
   }
 }
 
@@ -263,6 +283,7 @@ async function submitForm(form, endpoint, message, method = "POST", extraBody = 
     form.reset();
     if (form.id === "sale-form") {
       $("#sale-stock-hint").textContent = "Chọn mã sản phẩm để xem số lượng tồn.";
+      $("#selected-sale-product").classList.add("hidden");
     }
     await refreshAll();
     toast(message);
@@ -331,6 +352,7 @@ function startManagerEdit(id) {
   if (!manager) return;
   state.editingManagerId = id;
   const form = $("#manager-form");
+  form.elements.name.value = manager.name;
   form.elements.phone.value = manager.phone;
   form.elements.password.value = "";
   form.elements.password.required = false;
@@ -348,9 +370,37 @@ document.querySelectorAll("[data-go]").forEach((button) => {
   button.addEventListener("click", () => showView(button.dataset.go));
 });
 
+document.querySelectorAll("[data-toggle-password]").forEach((button) => {
+  button.addEventListener("click", () => {
+    const input = document.getElementById(button.dataset.togglePassword);
+    const showing = input.type === "text";
+    input.type = showing ? "password" : "text";
+    button.classList.toggle("active", !showing);
+    button.setAttribute("aria-label", showing ? "Hiện mật khẩu" : "Ẩn mật khẩu");
+    button.title = showing ? "Hiện mật khẩu" : "Ẩn mật khẩu";
+  });
+});
+
 $("#login-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   const form = event.currentTarget;
+  const errorElement = $("#login-error");
+  const phone = String(form.elements.phone.value).replace(/[\s.-]/g, "");
+  const password = form.elements.password.value;
+  errorElement.classList.add("hidden");
+  errorElement.textContent = "";
+  if (!/^\+?\d{8,15}$/.test(phone)) {
+    errorElement.textContent = "Số điện thoại phải có từ 8 đến 15 chữ số.";
+    errorElement.classList.remove("hidden");
+    form.elements.phone.focus();
+    return;
+  }
+  if (password.length < 8) {
+    errorElement.textContent = "Mật khẩu phải có ít nhất 8 ký tự.";
+    errorElement.classList.remove("hidden");
+    form.elements.password.focus();
+    return;
+  }
   const button = form.querySelector("button[type=submit]");
   button.disabled = true;
   button.textContent = "Đang đăng nhập...";
@@ -367,6 +417,8 @@ $("#login-form").addEventListener("submit", async (event) => {
     await refreshAll();
     form.reset();
   } catch (error) {
+    errorElement.textContent = error.message;
+    errorElement.classList.remove("hidden");
     toast(error.message, "error");
   } finally {
     button.disabled = false;
@@ -415,6 +467,15 @@ receiveForm.addEventListener("submit", (event) => {
 
 const saleForm = $("#sale-form");
 saleForm.elements.code.addEventListener("input", () => fillProductFields(saleForm, true));
+$("#generate-order-code").addEventListener("click", () => {
+  const date = new Date();
+  const datePart = localDateValue(date).replaceAll("-", "");
+  const timePart = [date.getHours(), date.getMinutes(), date.getSeconds()]
+    .map((value) => String(value).padStart(2, "0"))
+    .join("");
+  const randomPart = String(Math.floor(Math.random() * 100)).padStart(2, "0");
+  saleForm.elements.orderCode.value = `DH-${datePart}-${timePart}${randomPart}`;
+});
 saleForm.addEventListener("submit", (event) => {
   event.preventDefault();
   submitForm(saleForm, "/api/sales", "Đã xuất hàng và ghi nhận kênh bán.");
@@ -460,7 +521,7 @@ $("#manager-table").addEventListener("click", async (event) => {
   const id = Number(button.dataset.id);
   if (button.dataset.managerAction === "edit") return startManagerEdit(id);
   const manager = state.managers.find((item) => item.id === id);
-  if (!manager || !window.confirm(`Xóa tài khoản quản lý ${manager.phone}?`)) return;
+  if (!manager || !window.confirm(`Xóa tài khoản ${manager.name} (${manager.phone})?`)) return;
   try {
     await api(`/api/managers/${id}`, { method: "DELETE", body: "{}" });
     if (state.editingManagerId === id) resetManagerForm();

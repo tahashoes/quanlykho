@@ -6,15 +6,16 @@
 
 - Thêm hàng hóa: mã sản phẩm, tên, số lượng, đơn giá nhập, giá bán và ảnh sản phẩm tùy chọn.
 - Nhập thêm hàng; giá nhập bình quân được cập nhật tự động.
-- Xuất hàng theo 6 kênh: Facebook, Zalo, TikTok, Shopee, Website và Lazada.
+- Xuất hàng theo mã đơn hàng không trùng và 6 kênh: Facebook, Zalo, TikTok, Shopee, Website và Lazada.
+- Khi chọn mã sản phẩm để xuất, giao diện hiển thị ngay tên, ảnh và số lượng tồn.
 - Tồn kho giảm ngay khi xuất; không thể xuất vượt quá số lượng hiện có.
 - Báo cáo theo ngày, tuần hoặc tháng:
   - doanh thu và lợi nhuận;
   - số đơn hàng bán ra;
   - tổng số lượng sản phẩm bán ra;
   - thống kê riêng từng kênh và tổng tất cả các kênh.
-- Đăng nhập bằng số điện thoại và mật khẩu.
-- Admin có thể thêm, sửa và xóa tối đa 5 tài khoản quản lý.
+- Đăng nhập bằng số điện thoại và mật khẩu, có kiểm tra định dạng và nút hiện/ẩn mật khẩu.
+- Admin có thể thêm, sửa và xóa tối đa 5 tài khoản quản lý; mỗi tài khoản gồm tên, số điện thoại và mật khẩu.
 - Quản lý được nhập hàng, xuất hàng, xem tồn kho và báo cáo nhưng không được quản lý tài khoản.
 
 Mỗi lần xác nhận **Xuất hàng** được tính là một đơn hàng. Số sản phẩm bán ra là tổng số lượng của các đơn.

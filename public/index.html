@@ -21,7 +21,13 @@
         </div>
         <form id="login-form" class="login-form">
           <label>Số điện thoại<input required name="phone" inputmode="tel" autocomplete="username" placeholder="Nhập số điện thoại" /></label>
-          <label>Mật khẩu<input required name="password" type="password" autocomplete="current-password" placeholder="Nhập mật khẩu" /></label>
+          <label>Mật khẩu
+            <span class="password-field">
+              <input id="login-password" required name="password" type="password" autocomplete="current-password" placeholder="Nhập mật khẩu" minlength="8" />
+              <button class="password-toggle" type="button" data-toggle-password="login-password" aria-label="Hiện mật khẩu" title="Hiện mật khẩu">◉</button>
+            </span>
+          </label>
+          <p class="form-error hidden" id="login-error"></p>
           <button class="button button-primary" type="submit">Đăng nhập</button>
         </form>
         <p class="login-footnote">Tài khoản được bảo vệ bằng mật khẩu mã hóa và phiên đăng nhập riêng.</p>
@@ -109,8 +115,18 @@
             <article class="card">
               <div class="card-heading"><div><p class="eyebrow">Bán hàng</p><h2>Xuất hàng khỏi kho</h2></div></div>
               <form id="sale-form" class="form-grid-inner">
+                <label>Mã đơn hàng
+                  <span class="input-with-action">
+                    <input required name="orderCode" placeholder="VD: DH-20260729-001" maxlength="64" />
+                    <button type="button" class="inline-button" id="generate-order-code">Tạo mã</button>
+                  </span>
+                </label>
                 <label>Mã sản phẩm<input required name="code" list="product-codes" placeholder="Chọn hoặc nhập mã" /></label>
                 <label>Tên sản phẩm<input name="name" readonly placeholder="Tự hiển thị theo mã" /></label>
+                <div class="selected-product hidden" id="selected-sale-product">
+                  <span class="selected-product-visual"><img alt="" /><span class="product-placeholder"></span></span>
+                  <span><strong></strong><small></small></span>
+                </div>
                 <label>Số lượng xuất<input required name="quantity" type="number" min="1" step="1" placeholder="0" /></label>
                 <label>Giá bán<input required name="salePrice" type="number" min="0" step="1000" placeholder="0" /></label>
                 <label>Kênh bán<select required name="channel"><option value="">Chọn kênh bán</option><option value="facebook">Facebook</option><option value="zalo">Zalo</option><option value="tiktok">TikTok</option><option value="shopee">Shopee</option><option value="website">Website</option><option value="lazada">Lazada</option></select></label>
@@ -146,7 +162,7 @@
           </article>
           <article class="card full-card report-detail">
             <div class="card-heading"><div><p class="eyebrow">Chi tiết kỳ báo cáo</p><h2>Các đơn hàng đã bán</h2></div></div>
-            <div class="table-wrap"><table><thead><tr><th>Thời gian</th><th>Kênh</th><th>Mã sản phẩm</th><th>Tên sản phẩm</th><th>Số lượng</th><th>Đơn giá</th><th>Thành tiền</th></tr></thead><tbody id="transaction-table"></tbody></table></div>
+            <div class="table-wrap"><table><thead><tr><th>Thời gian</th><th>Mã đơn</th><th>Kênh</th><th>Mã sản phẩm</th><th>Tên sản phẩm</th><th>Số lượng</th><th>Đơn giá</th><th>Thành tiền</th></tr></thead><tbody id="transaction-table"></tbody></table></div>
           </article>
         </section>
 
@@ -155,8 +171,14 @@
             <article class="card">
               <div class="card-heading"><div><p class="eyebrow">Phân quyền</p><h2 id="manager-form-title">Thêm tài khoản quản lý</h2></div><span class="manager-limit" id="manager-limit">0/5</span></div>
               <form id="manager-form" class="manager-form">
+                <label>Tên người quản lý<input required name="name" maxlength="120" placeholder="VD: Nguyễn Văn An" /></label>
                 <label>Số điện thoại<input required name="phone" inputmode="tel" placeholder="VD: 0912345678" /></label>
-                <label>Mật khẩu <span class="optional" id="manager-password-note">(tối thiểu 8 ký tự)</span><input required name="password" type="password" autocomplete="new-password" placeholder="Nhập mật khẩu" /></label>
+                <label>Mật khẩu <span class="optional" id="manager-password-note">(tối thiểu 8 ký tự)</span>
+                  <span class="password-field">
+                    <input id="manager-password" required name="password" type="password" autocomplete="new-password" placeholder="Nhập mật khẩu" minlength="8" />
+                    <button class="password-toggle" type="button" data-toggle-password="manager-password" aria-label="Hiện mật khẩu" title="Hiện mật khẩu">◉</button>
+                  </span>
+                </label>
                 <div class="form-actions"><button class="button button-primary" type="submit">Thêm quản lý</button><button class="button button-ghost hidden" type="button" id="cancel-manager-edit">Hủy sửa</button></div>
               </form>
             </article>
@@ -164,7 +186,7 @@
           </div>
           <article class="card full-card manager-table-card">
             <div class="card-heading"><div><p class="eyebrow">Danh sách tài khoản</p><h2>Quản lý đang hoạt động</h2></div></div>
-            <div class="table-wrap"><table><thead><tr><th>Số điện thoại</th><th>Vai trò</th><th>Ngày tạo</th><th>Cập nhật</th><th>Thao tác</th></tr></thead><tbody id="manager-table"></tbody></table></div>
+            <div class="table-wrap"><table><thead><tr><th>Tên người quản lý</th><th>Số điện thoại</th><th>Vai trò</th><th>Ngày tạo</th><th>Cập nhật</th><th>Thao tác</th></tr></thead><tbody id="manager-table"></tbody></table></div>
           </article>
         </section>
       </main>

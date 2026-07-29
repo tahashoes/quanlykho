@@ -43,6 +43,7 @@ db.exec(`
   );
   CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY,
+    display_name TEXT NOT NULL,
     phone TEXT NOT NULL UNIQUE,
     password_hash TEXT NOT NULL,
     password_salt TEXT NOT NULL,
@@ -71,6 +72,21 @@ function ensureColumn(table, column, definition) {
 
 ensureColumn("products", "image_data", "TEXT");
 ensureColumn("transactions", "sales_channel", "TEXT");
+ensureColumn("transactions", "order_code", "TEXT");
+ensureColumn("users", "display_name", "TEXT");
+db.exec(`
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_transactions_order_code
+  ON transactions(order_code)
+  WHERE kind = 'OUT' AND order_code IS NOT NULL;
+`);
+db.prepare(`
+  UPDATE users
+  SET display_name = CASE
+    WHEN role = 'admin' THEN 'Quản trị viên'
+    ELSE 'Quản lý ' || phone
+  END
+  WHERE display_name IS NULL OR TRIM(display_name) = ''
+`).run();
 
 class AppError extends Error {
   constructor(message, status = 400) {
@@ -109,6 +125,22 @@ function cleanText(value, label) {
   const text = String(value ?? "").trim();
   if (!text) throw new AppError(`${label} không được để trống.`);
   return text;
+}
+
+function cleanName(value) {
+  const name = cleanText(value, "Tên người quản lý");
+  if (name.length > 120) {
+    throw new AppError("Tên người quản lý không được vượt quá 120 ký tự.");
+  }
+  return name;
+}
+
+function cleanOrderCode(value) {
+  const orderCode = cleanText(value, "Mã đơn hàng").toUpperCase();
+  if (orderCode.length > 64 || !/^[A-Z0-9._/-]+$/.test(orderCode)) {
+    throw new AppError("Mã đơn hàng chỉ gồm chữ, số, dấu chấm, gạch ngang, gạch dưới hoặc dấu gạch chéo.");
+  }
+  return orderCode;
 }
 
 function cleanPhone(value) {
@@ -178,8 +210,9 @@ function bootstrapAdmin() {
   const passwordData = hashPassword(cleanAdminPassword);
   const timestamp = now();
   db.prepare(`
-    INSERT INTO users (phone, password_hash, password_salt, role, created_at, updated_at)
-    VALUES (?, ?, ?, 'admin', ?, ?)
+    INSERT INTO users
+      (display_name, phone, password_hash, password_salt, role, created_at, updated_at)
+    VALUES ('Quản trị viên', ?, ?, ?, 'admin', ?, ?)
   `).run(cleanAdminPhone, passwordData.hash, passwordData.salt, timestamp, timestamp);
 
   if (!isProduction) {
@@ -247,7 +280,7 @@ function getCurrentUser(request) {
   if (!token) return null;
   const tokenDigest = sessionHash(token);
   const session = db.prepare(`
-    SELECT u.id, u.phone, u.role, s.expires_at
+    SELECT u.id, u.display_name, u.phone, u.role, s.expires_at
     FROM sessions s JOIN users u ON u.id = s.user_id
     WHERE s.token_hash = ?
   `).get(tokenDigest);
@@ -258,6 +291,7 @@ function getCurrentUser(request) {
   }
   return {
     id: Number(session.id),
+    name: session.display_name,
     phone: session.phone,
     role: session.role
   };
@@ -299,6 +333,7 @@ function login(body, response) {
   `).run(sessionHash(token), user.id, expiresAt, createdAt);
   return json(response, 200, {
     id: Number(user.id),
+    name: user.display_name,
     phone: user.phone,
     role: user.role
   }, {
@@ -347,7 +382,7 @@ function dashboard() {
     FROM products
   `).get();
   const recent = db.prepare(`
-    SELECT t.id, t.kind, t.quantity, t.unit_price, t.unit_cost, t.sales_channel,
+    SELECT t.id, t.kind, t.quantity, t.unit_price, t.unit_cost, t.sales_channel, t.order_code,
            t.created_at, p.code, p.name
     FROM transactions t JOIN products p ON p.id = t.product_id
     ORDER BY t.id DESC LIMIT 8
@@ -373,6 +408,7 @@ function transactionView(row) {
     unitPrice: Number(row.unit_price),
     unitCost: Number(row.unit_cost),
     channel: row.sales_channel || null,
+    orderCode: row.order_code || null,
     createdAt: row.created_at,
     code: row.code,
     name: row.name
@@ -390,7 +426,7 @@ function listProducts(search = "") {
 
 function listTransactions(limit = 100) {
   return db.prepare(`
-    SELECT t.id, t.kind, t.quantity, t.unit_price, t.unit_cost, t.sales_channel,
+    SELECT t.id, t.kind, t.quantity, t.unit_price, t.unit_cost, t.sales_channel, t.order_code,
            t.created_at, p.code, p.name
     FROM transactions t JOIN products p ON p.id = t.product_id
     ORDER BY t.id DESC LIMIT ?
@@ -462,12 +498,17 @@ function receiveStock(body) {
 }
 
 function sellStock(body) {
+  const orderCode = cleanOrderCode(body.orderCode);
   const code = cleanText(body.code, "Mã sản phẩm").toUpperCase();
   const quantity = positiveInteger(body.quantity, "Số lượng xuất");
   const salePrice = nonNegativeNumber(body.salePrice, "Giá bán");
   const channel = cleanChannel(body.channel);
   const product = getProductByCode(code);
   if (!product) throw new AppError("Không tìm thấy sản phẩm theo mã này.", 404);
+  const existingOrder = db.prepare(`
+    SELECT id FROM transactions WHERE kind = 'OUT' AND order_code = ?
+  `).get(orderCode);
+  if (existingOrder) throw new AppError("Mã đơn hàng này đã tồn tại.");
   if (Number(product.stock) < quantity) {
     throw new AppError(`Số lượng tồn không đủ. Hiện còn ${product.stock}.`);
   }
@@ -479,9 +520,17 @@ function sellStock(body) {
     `).run(quantity, salePrice, timestamp, product.id);
     db.prepare(`
       INSERT INTO transactions
-        (product_id, kind, quantity, unit_price, unit_cost, sales_channel, created_at)
-      VALUES (?, 'OUT', ?, ?, ?, ?, ?)
-    `).run(product.id, quantity, salePrice, Number(product.cost_price), channel, timestamp);
+        (product_id, kind, quantity, unit_price, unit_cost, sales_channel, order_code, created_at)
+      VALUES (?, 'OUT', ?, ?, ?, ?, ?, ?)
+    `).run(
+      product.id,
+      quantity,
+      salePrice,
+      Number(product.cost_price),
+      channel,
+      orderCode,
+      timestamp
+    );
     db.exec("COMMIT");
   } catch (error) {
     db.exec("ROLLBACK");
@@ -571,7 +620,7 @@ function salesReport(period, anchor) {
     profit: result.profit + item.profit
   }), { orders: 0, units: 0, revenue: 0, cogs: 0, profit: 0 });
   const transactions = db.prepare(`
-    SELECT t.id, t.kind, t.quantity, t.unit_price, t.unit_cost, t.sales_channel,
+    SELECT t.id, t.kind, t.quantity, t.unit_price, t.unit_cost, t.sales_channel, t.order_code,
            t.created_at, p.code, p.name
     FROM transactions t JOIN products p ON p.id = t.product_id
     WHERE t.kind = 'OUT' AND t.created_at >= ? AND t.created_at < ?
@@ -583,6 +632,7 @@ function salesReport(period, anchor) {
 function managerView(user) {
   return {
     id: Number(user.id),
+    name: user.display_name,
     phone: user.phone,
     role: user.role,
     createdAt: user.created_at,
@@ -592,7 +642,7 @@ function managerView(user) {
 
 function listManagers() {
   return db.prepare(`
-    SELECT id, phone, role, created_at, updated_at
+    SELECT id, display_name, phone, role, created_at, updated_at
     FROM users WHERE role = 'manager' ORDER BY id DESC
   `).all().map(managerView);
 }
@@ -604,17 +654,19 @@ function createManager(body) {
   if (managerCount >= 5) {
     throw new AppError("Đã đạt giới hạn tối đa 5 tài khoản quản lý.");
   }
+  const name = cleanName(body.name);
   const phone = cleanPhone(body.phone);
   const password = cleanPassword(body.password);
   const passwordData = hashPassword(password);
   const timestamp = now();
   try {
     const result = db.prepare(`
-      INSERT INTO users (phone, password_hash, password_salt, role, created_at, updated_at)
-      VALUES (?, ?, ?, 'manager', ?, ?)
-    `).run(phone, passwordData.hash, passwordData.salt, timestamp, timestamp);
+      INSERT INTO users
+        (display_name, phone, password_hash, password_salt, role, created_at, updated_at)
+      VALUES (?, ?, ?, ?, 'manager', ?, ?)
+    `).run(name, phone, passwordData.hash, passwordData.salt, timestamp, timestamp);
     return managerView(db.prepare(`
-      SELECT id, phone, role, created_at, updated_at FROM users WHERE id = ?
+      SELECT id, display_name, phone, role, created_at, updated_at FROM users WHERE id = ?
     `).get(Number(result.lastInsertRowid)));
   } catch (error) {
     if (String(error.message).includes("UNIQUE")) {
@@ -627,6 +679,7 @@ function createManager(body) {
 function updateManager(id, body) {
   const current = db.prepare("SELECT * FROM users WHERE id = ? AND role = 'manager'").get(id);
   if (!current) throw new AppError("Không tìm thấy tài khoản quản lý.", 404);
+  const name = cleanName(body.name);
   const phone = cleanPhone(body.phone);
   const password = cleanPassword(body.password, false);
   const timestamp = now();
@@ -634,14 +687,16 @@ function updateManager(id, body) {
     if (password) {
       const passwordData = hashPassword(password);
       db.prepare(`
-        UPDATE users SET phone = ?, password_hash = ?, password_salt = ?, updated_at = ?
+        UPDATE users
+        SET display_name = ?, phone = ?, password_hash = ?, password_salt = ?, updated_at = ?
         WHERE id = ? AND role = 'manager'
-      `).run(phone, passwordData.hash, passwordData.salt, timestamp, id);
+      `).run(name, phone, passwordData.hash, passwordData.salt, timestamp, id);
       db.prepare("DELETE FROM sessions WHERE user_id = ?").run(id);
     } else {
       db.prepare(`
-        UPDATE users SET phone = ?, updated_at = ? WHERE id = ? AND role = 'manager'
-      `).run(phone, timestamp, id);
+        UPDATE users SET display_name = ?, phone = ?, updated_at = ?
+        WHERE id = ? AND role = 'manager'
+      `).run(name, phone, timestamp, id);
     }
   } catch (error) {
     if (String(error.message).includes("UNIQUE")) {
@@ -650,7 +705,7 @@ function updateManager(id, body) {
     throw error;
   }
   return managerView(db.prepare(`
-    SELECT id, phone, role, created_at, updated_at FROM users WHERE id = ?
+    SELECT id, display_name, phone, role, created_at, updated_at FROM users WHERE id = ?
   `).get(id));
 }
 

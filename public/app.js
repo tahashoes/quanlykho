@@ -50,6 +50,7 @@ const state = {
   productImage: null,
   editingManagerId: null
 };
+let saleOrderSequence = 0;
 
 async function api(url, options = {}) {
   const response = await fetch(url, {
@@ -85,6 +86,13 @@ function text(value) {
     "'": "&#39;",
     "\"": "&quot;"
   })[char]);
+}
+
+function discountLabel(item) {
+  if (!item.discountValue) return "—";
+  return item.discountType === "percent"
+    ? `${Number(item.discountValue).toLocaleString("vi-VN")}%`
+    : `${money.format(item.discountValue)} / SP`;
 }
 
 function metric(label, value, note, accent = false) {
@@ -231,7 +239,7 @@ function renderDashboard() {
       const details = item.kind === "IN"
         ? "Nhập hàng"
         : `Xuất hàng · ${item.orderCode || "Chưa có mã đơn"} · ${channelLabels[item.channel] || "Chưa xác định"}`;
-      return `<div class="compact-row"><span class="row-icon ${item.kind === "OUT" ? "out" : ""}">${item.kind === "IN" ? "+" : "−"}</span><div class="row-copy"><strong>${text(item.name)}</strong><small>${details} · ${dateTime.format(new Date(item.createdAt))}</small></div><div class="row-value">${item.kind === "IN" ? "+" : "−"}${item.quantity}<small>${money.format(item.quantity * item.unitPrice)}</small></div></div>`;
+      return `<div class="compact-row"><span class="row-icon ${item.kind === "OUT" ? "out" : ""}">${item.kind === "IN" ? "+" : "−"}</span><div class="row-copy"><strong>${text(item.name)}</strong><small>${details} · ${dateTime.format(new Date(item.createdAt))}</small></div><div class="row-value">${item.kind === "IN" ? "+" : "−"}${item.quantity}<small>${money.format(item.total ?? item.quantity * item.unitPrice)}</small></div></div>`;
     }).join("")
     : `<p class="empty">Chưa có giao dịch nào.</p>`;
 }
@@ -262,8 +270,8 @@ function renderHistories() {
     : `<tr><td colspan="7" class="empty">Chưa có lịch sử nhập hàng.</td></tr>`;
 
   $("#sale-history-table").innerHTML = saleRows.length
-    ? saleRows.map((item) => `<tr><td class="muted">${dateTime.format(new Date(item.createdAt))}</td><td><span class="operator-name">${text(item.operatorName || "Dữ liệu cũ")}</span></td><td class="product-name">${text(item.orderCode || "—")}</td><td><span class="channel-chip">${text(channelLabels[item.channel] || "Chưa xác định")}</span></td><td>${text(item.code)}</td><td class="product-name">${text(item.name)}</td><td>${item.quantity.toLocaleString("vi-VN")}</td><td>${money.format(item.unitPrice)}</td><td>${money.format(item.quantity * item.unitPrice)}</td></tr>`).join("")
-    : `<tr><td colspan="9" class="empty">Chưa có lịch sử xuất hàng.</td></tr>`;
+    ? saleRows.map((item) => `<tr><td class="muted">${dateTime.format(new Date(item.createdAt))}</td><td><span class="operator-name">${text(item.operatorName || "Dữ liệu cũ")}</span></td><td class="product-name">${text(item.orderCode || "—")}</td><td><span class="channel-chip">${text(channelLabels[item.channel] || "Chưa xác định")}</span></td><td>${text(item.code)}</td><td class="product-name">${text(item.name)}</td><td>${item.quantity.toLocaleString("vi-VN")}</td><td>${money.format(item.unitPrice)}</td><td>${text(discountLabel(item))}</td><td>${money.format(item.total ?? item.quantity * item.unitPrice)}</td></tr>`).join("")
+    : `<tr><td colspan="10" class="empty">Chưa có lịch sử xuất hàng.</td></tr>`;
 }
 
 function renderReport() {
@@ -275,7 +283,7 @@ function renderReport() {
   $("#report-metrics").innerHTML = [
     metric("Doanh thu", money.format(report.totals.revenue), "Tổng tất cả kênh", true),
     metric("Lợi nhuận", money.format(report.totals.profit), "Doanh thu trừ giá vốn"),
-    metric("Số đơn hàng", report.totals.orders.toLocaleString("vi-VN"), "Mỗi lần xuất là một đơn"),
+    metric("Số đơn hàng", report.totals.orders.toLocaleString("vi-VN"), "Đếm theo mã đơn hàng"),
     metric("Sản phẩm bán ra", report.totals.units.toLocaleString("vi-VN"), "Tổng số lượng trong các đơn")
   ].join("");
   const channelRanking = report.channels.filter((item) => item.channel !== "unknown").sort(
@@ -300,8 +308,8 @@ function renderReport() {
   const channelRows = report.channels.map((item) => `<tr><td><span class="channel-chip">${text(channelLabels[item.channel] || item.channel)}</span></td><td>${item.orders.toLocaleString("vi-VN")}</td><td>${item.units.toLocaleString("vi-VN")}</td><td>${money.format(item.revenue)}</td><td>${money.format(item.profit)}</td></tr>`).join("");
   $("#channel-table").innerHTML = `${channelRows}<tr class="channel-total"><td>TỔNG TẤT CẢ KÊNH</td><td>${report.totals.orders.toLocaleString("vi-VN")}</td><td>${report.totals.units.toLocaleString("vi-VN")}</td><td>${money.format(report.totals.revenue)}</td><td>${money.format(report.totals.profit)}</td></tr>`;
   $("#transaction-table").innerHTML = report.transactions.length
-    ? report.transactions.map((item) => `<tr><td class="muted">${dateTime.format(new Date(item.createdAt))}</td><td class="product-name">${text(item.orderCode || "—")}</td><td><span class="channel-chip">${text(channelLabels[item.channel] || "Chưa xác định")}</span></td><td>${text(item.code)}</td><td class="product-name">${text(item.name)}</td><td>${item.quantity}</td><td>${money.format(item.unitPrice)}</td><td>${money.format(item.quantity * item.unitPrice)}</td></tr>`).join("")
-    : `<tr><td colspan="8" class="empty">Không có đơn hàng trong khoảng thời gian này.</td></tr>`;
+    ? report.transactions.map((item) => `<tr><td class="muted">${dateTime.format(new Date(item.createdAt))}</td><td class="product-name">${text(item.orderCode || "—")}</td><td><span class="channel-chip">${text(channelLabels[item.channel] || "Chưa xác định")}</span></td><td>${text(item.code)}</td><td class="product-name">${text(item.name)}</td><td>${item.quantity}</td><td>${money.format(item.unitPrice)}</td><td>${text(discountLabel(item))}</td><td>${money.format(item.total ?? item.quantity * item.unitPrice)}</td></tr>`).join("")
+    : `<tr><td colspan="9" class="empty">Không có đơn hàng trong khoảng thời gian này.</td></tr>`;
 }
 
 function renderManagers() {
@@ -317,35 +325,216 @@ function findProduct(code) {
   );
 }
 
-function fillProductFields(form, showStock = false) {
+function fillProductFields(form) {
   const product = findProduct(form.elements.code.value);
   form.elements.name.value = product ? product.name : "";
   if (product && form.elements.salePrice && !form.elements.salePrice.value) {
     form.elements.salePrice.value = product.salePrice;
   }
-  if (showStock) {
-    $("#sale-stock-hint").textContent = product
-      ? `Hiện còn ${product.stock} đơn vị · giá bán gợi ý ${money.format(product.salePrice)}.`
-      : "Không tìm thấy sản phẩm theo mã đã nhập.";
-    const preview = $("#selected-sale-product");
-    const previewImage = preview.querySelector("img");
-    const placeholder = preview.querySelector(".product-placeholder");
-    preview.classList.toggle("hidden", !product);
-    if (product) {
-      preview.querySelector("strong").textContent = product.name;
-      preview.querySelector("small").textContent = `${product.code} · còn ${product.stock} sản phẩm`;
-      if (product.image) {
-        previewImage.src = product.image;
-        previewImage.classList.remove("hidden");
-        placeholder.classList.add("hidden");
-      } else {
-        previewImage.removeAttribute("src");
-        previewImage.classList.add("hidden");
-        placeholder.textContent = product.name.slice(0, 1).toUpperCase();
-        placeholder.classList.remove("hidden");
+}
+
+function generateSaleOrderCode() {
+  const date = new Date();
+  const datePart = localDateValue(date).replaceAll("-", "");
+  const timePart = [date.getHours(), date.getMinutes(), date.getSeconds()]
+    .map((value) => String(value).padStart(2, "0"))
+    .join("");
+  saleOrderSequence = (saleOrderSequence + 1) % 100;
+  return `DH-${datePart}-${timePart}${String(saleOrderSequence).padStart(2, "0")}`;
+}
+
+function saleItemTemplate() {
+  return `<div class="sale-item-row" data-sale-item>
+    <div class="sale-item-main">
+      <label class="sale-product-code">Mã sản phẩm <span class="required-star">*</span>
+        <input data-sale-field="code" list="product-codes" placeholder="VD: PH003" autocomplete="off" />
+      </label>
+      <div class="sale-product-preview" data-sale-preview>
+        <span class="sale-preview-placeholder">?</span>
+        <span><strong>Chưa chọn sản phẩm</strong><small>Nhập mã để xem tên, ảnh và tồn kho</small></span>
+      </div>
+      <label>Số lượng <span class="required-star">*</span>
+        <input data-sale-field="quantity" type="number" min="1" step="1" value="1" />
+      </label>
+      <label>Giá bán / SP <span class="required-star">*</span>
+        <input data-sale-field="salePrice" type="number" min="0" step="1000" placeholder="0" />
+      </label>
+      <label>Loại giảm giá
+        <select data-sale-field="discountType">
+          <option value="">Không giảm</option>
+          <option value="percent">Phần trăm (%)</option>
+          <option value="amount">Số tiền / SP</option>
+        </select>
+      </label>
+      <label>Giá trị giảm
+        <input data-sale-field="discountValue" type="number" min="0" step="1000" value="0" disabled />
+      </label>
+      <div class="sale-line-total"><span>Thành tiền</span><strong data-sale-total>${money.format(0)}</strong></div>
+      <button class="sale-remove-button" type="button" data-sale-action="remove-item" aria-label="Xóa sản phẩm" title="Xóa sản phẩm">×</button>
+    </div>
+  </div>`;
+}
+
+function saleOrderTemplate(orderCode = generateSaleOrderCode()) {
+  return `<section class="sale-order-card" data-sale-order>
+    <div class="sale-order-header">
+      <div class="sale-order-title"><span class="sale-order-number" data-sale-order-number>Đơn hàng</span><small>Mỗi mã đơn có thể chứa nhiều sản phẩm</small></div>
+      <label class="sale-order-code">Mã đơn hàng <span class="required-star">*</span>
+        <span class="input-with-action">
+          <input data-sale-field="orderCode" value="${text(orderCode)}" maxlength="64" placeholder="VD: DH-001" />
+          <button type="button" class="inline-button" data-sale-action="generate-order">Tạo mã</button>
+        </span>
+      </label>
+      <button class="sale-remove-order" type="button" data-sale-action="remove-order">Xóa đơn</button>
+    </div>
+    <div class="sale-order-items">${saleItemTemplate()}</div>
+    <button class="sale-add-item" type="button" data-sale-action="add-item">+ Thêm sản phẩm vào đơn</button>
+  </section>`;
+}
+
+function updateSaleBuilderSummary() {
+  const orders = [...document.querySelectorAll("[data-sale-order]")];
+  const channelReady = Boolean($("#sale-form").elements.channel.value);
+  $("#sale-orders").classList.toggle("locked", !channelReady);
+  $("#sale-form [data-sale-action='add-order']").disabled = !channelReady;
+  orders.forEach((order, index) => {
+    order.querySelector("[data-sale-order-number]").textContent = `Đơn hàng ${index + 1}`;
+    order.querySelector("[data-sale-field='orderCode']").disabled = !channelReady;
+    order.querySelector("[data-sale-action='generate-order']").disabled = !channelReady;
+    order.querySelector("[data-sale-action='add-item']").disabled = !channelReady;
+    order.querySelector("[data-sale-action='remove-order']").disabled =
+      !channelReady || orders.length === 1;
+    const items = [...order.querySelectorAll("[data-sale-item]")];
+    items.forEach((item) => {
+      item.querySelectorAll("input, select").forEach((field) => {
+        const isDiscountValue = field.dataset.saleField === "discountValue";
+        const discountType = item.querySelector("[data-sale-field='discountType']").value;
+        field.disabled = !channelReady || (isDiscountValue && !discountType);
+      });
+      item.querySelector("[data-sale-action='remove-item']").disabled =
+        !channelReady || items.length === 1;
+    });
+  });
+  const itemCount = document.querySelectorAll("[data-sale-item]").length;
+  $("#sale-batch-summary").textContent =
+    `${orders.length} đơn hàng · ${itemCount} dòng sản phẩm`;
+}
+
+function updateSaleItem(item, prefillPrice = false) {
+  const codeInput = item.querySelector("[data-sale-field='code']");
+  const priceInput = item.querySelector("[data-sale-field='salePrice']");
+  const quantityInput = item.querySelector("[data-sale-field='quantity']");
+  const discountTypeInput = item.querySelector("[data-sale-field='discountType']");
+  const discountValueInput = item.querySelector("[data-sale-field='discountValue']");
+  const product = findProduct(codeInput.value);
+  const preview = item.querySelector("[data-sale-preview]");
+
+  if (product) {
+    if (prefillPrice) priceInput.value = product.salePrice;
+    const visual = product.image
+      ? `<img src="${product.image}" alt="" />`
+      : `<span class="sale-preview-placeholder">${text(product.name.slice(0, 1).toUpperCase())}</span>`;
+    preview.innerHTML = `${visual}<span><strong>${text(product.name)}</strong><small>${text(product.code)} · còn ${product.stock.toLocaleString("vi-VN")} sản phẩm</small></span>`;
+    preview.classList.add("found");
+  } else {
+    preview.innerHTML = `<span class="sale-preview-placeholder">?</span><span><strong>Chưa chọn sản phẩm</strong><small>Nhập mã để xem tên, ảnh và tồn kho</small></span>`;
+    preview.classList.remove("found");
+  }
+
+  const hasDiscount = Boolean(discountTypeInput.value);
+  discountValueInput.disabled = !hasDiscount;
+  if (!hasDiscount) discountValueInput.value = 0;
+  discountValueInput.step = discountTypeInput.value === "percent" ? "0.01" : "1000";
+  discountValueInput.max = discountTypeInput.value === "percent"
+    ? "100"
+    : String(Math.max(0, Number(priceInput.value) || 0));
+
+  const quantity = Math.max(0, Number(quantityInput.value) || 0);
+  const price = Math.max(0, Number(priceInput.value) || 0);
+  const discountValue = Math.max(0, Number(discountValueInput.value) || 0);
+  const gross = quantity * price;
+  const discount = discountTypeInput.value === "percent"
+    ? gross * Math.min(100, discountValue) / 100
+    : discountTypeInput.value === "amount"
+      ? quantity * Math.min(price, discountValue)
+      : 0;
+  item.querySelector("[data-sale-total]").textContent = money.format(Math.max(0, gross - discount));
+}
+
+function resetSaleBuilder() {
+  const form = $("#sale-form");
+  form.reset();
+  $("#sale-orders").innerHTML = saleOrderTemplate();
+  $("#sale-form-error").textContent = "";
+  $("#sale-form-error").classList.add("hidden");
+  updateSaleBuilderSummary();
+}
+
+function collectSalesPayload() {
+  const form = $("#sale-form");
+  const channel = form.elements.channel.value;
+  if (!channel) throw new Error("Vui lòng chọn kênh bán hàng trước.");
+
+  const seenOrderCodes = new Set();
+  const stockNeeded = new Map();
+  const orders = [...form.querySelectorAll("[data-sale-order]")].map((order, orderIndex) => {
+    const orderCodeInput = order.querySelector("[data-sale-field='orderCode']");
+    const orderCode = orderCodeInput.value.trim().toUpperCase();
+    if (!orderCode) throw new Error(`Vui lòng nhập mã cho đơn hàng ${orderIndex + 1}.`);
+    if (!/^[A-Z0-9._/-]+$/.test(orderCode) || orderCode.length > 64) {
+      throw new Error(`Mã đơn ${orderCode} không đúng định dạng.`);
+    }
+    if (seenOrderCodes.has(orderCode)) {
+      throw new Error(`Mã đơn ${orderCode} đang bị nhập trùng.`);
+    }
+    seenOrderCodes.add(orderCode);
+
+    const seenProductCodes = new Set();
+    const items = [...order.querySelectorAll("[data-sale-item]")].map((item, itemIndex) => {
+      const code = item.querySelector("[data-sale-field='code']").value.trim().toUpperCase();
+      const product = findProduct(code);
+      if (!product) {
+        throw new Error(`Không tìm thấy sản phẩm ở dòng ${itemIndex + 1} của đơn ${orderCode}.`);
       }
+      if (seenProductCodes.has(product.code)) {
+        throw new Error(`Sản phẩm ${product.code} bị lặp trong đơn ${orderCode}.`);
+      }
+      seenProductCodes.add(product.code);
+
+      const quantity = Number(item.querySelector("[data-sale-field='quantity']").value);
+      const salePrice = Number(item.querySelector("[data-sale-field='salePrice']").value);
+      const discountType = item.querySelector("[data-sale-field='discountType']").value || null;
+      const discountValue = discountType
+        ? Number(item.querySelector("[data-sale-field='discountValue']").value)
+        : 0;
+      if (!Number.isInteger(quantity) || quantity <= 0) {
+        throw new Error(`Số lượng của ${product.code} phải là số nguyên lớn hơn 0.`);
+      }
+      if (!Number.isFinite(salePrice) || salePrice < 0) {
+        throw new Error(`Giá bán của ${product.code} không hợp lệ.`);
+      }
+      if (!Number.isFinite(discountValue) || discountValue < 0) {
+        throw new Error(`Giá trị giảm của ${product.code} không hợp lệ.`);
+      }
+      if (discountType === "percent" && discountValue > 100) {
+        throw new Error(`Giảm giá của ${product.code} không được vượt quá 100%.`);
+      }
+      if (discountType === "amount" && discountValue > salePrice) {
+        throw new Error(`Tiền giảm mỗi sản phẩm ${product.code} không được lớn hơn giá bán.`);
+      }
+      stockNeeded.set(product.code, (stockNeeded.get(product.code) || 0) + quantity);
+      return { code: product.code, quantity, salePrice, discountType, discountValue };
+    });
+    return { orderCode, items };
+  });
+
+  for (const [code, quantity] of stockNeeded) {
+    const product = findProduct(code);
+    if (quantity > product.stock) {
+      throw new Error(`Sản phẩm ${code} cần ${quantity}, nhưng trong kho chỉ còn ${product.stock}.`);
     }
   }
+  return { channel, orders };
 }
 
 function formData(form) {
@@ -412,10 +601,6 @@ async function submitForm(form, endpoint, message, method = "POST", extraBody = 
       body: JSON.stringify({ ...formData(form), ...extraBody })
     });
     form.reset();
-    if (form.id === "sale-form") {
-      $("#sale-stock-hint").textContent = "Chọn mã sản phẩm để xem số lượng tồn.";
-      $("#selected-sale-product").classList.add("hidden");
-    }
     await refreshAll();
     toast(message);
     return true;
@@ -603,19 +788,74 @@ receiveForm.addEventListener("submit", (event) => {
 });
 
 const saleForm = $("#sale-form");
-saleForm.elements.code.addEventListener("input", () => fillProductFields(saleForm, true));
-$("#generate-order-code").addEventListener("click", () => {
-  const date = new Date();
-  const datePart = localDateValue(date).replaceAll("-", "");
-  const timePart = [date.getHours(), date.getMinutes(), date.getSeconds()]
-    .map((value) => String(value).padStart(2, "0"))
-    .join("");
-  const randomPart = String(Math.floor(Math.random() * 100)).padStart(2, "0");
-  saleForm.elements.orderCode.value = `DH-${datePart}-${timePart}${randomPart}`;
+resetSaleBuilder();
+saleForm.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-sale-action]");
+  if (!button) return;
+  const action = button.dataset.saleAction;
+  const order = button.closest("[data-sale-order]");
+  if (action === "add-order") {
+    $("#sale-orders").insertAdjacentHTML("beforeend", saleOrderTemplate());
+  } else if (action === "generate-order") {
+    order.querySelector("[data-sale-field='orderCode']").value = generateSaleOrderCode();
+  } else if (action === "remove-order") {
+    if (saleForm.querySelectorAll("[data-sale-order]").length > 1) order.remove();
+  } else if (action === "add-item") {
+    order.querySelector(".sale-order-items").insertAdjacentHTML("beforeend", saleItemTemplate());
+  } else if (action === "remove-item") {
+    const items = order.querySelectorAll("[data-sale-item]");
+    if (items.length > 1) button.closest("[data-sale-item]").remove();
+  }
+  updateSaleBuilderSummary();
 });
-saleForm.addEventListener("submit", (event) => {
+saleForm.addEventListener("input", (event) => {
+  const item = event.target.closest("[data-sale-item]");
+  if (!item) return;
+  updateSaleItem(item, event.target.dataset.saleField === "code");
+});
+saleForm.addEventListener("change", (event) => {
+  if (event.target.name === "channel") {
+    updateSaleBuilderSummary();
+    return;
+  }
+  const item = event.target.closest("[data-sale-item]");
+  if (item) updateSaleItem(item, event.target.dataset.saleField === "code");
+});
+saleForm.addEventListener("submit", async (event) => {
   event.preventDefault();
-  submitForm(saleForm, "/api/sales", "Đã xuất hàng và ghi nhận kênh bán.");
+  const button = saleForm.querySelector("button[type='submit']");
+  const errorElement = $("#sale-form-error");
+  errorElement.classList.add("hidden");
+  errorElement.textContent = "";
+  let payload;
+  try {
+    payload = collectSalesPayload();
+  } catch (error) {
+    errorElement.textContent = error.message;
+    errorElement.classList.remove("hidden");
+    toast(error.message, "error");
+    return;
+  }
+  button.disabled = true;
+  button.textContent = "Đang xuất hàng...";
+  try {
+    const result = await api("/api/sales", {
+      method: "POST",
+      body: JSON.stringify(payload)
+    });
+    resetSaleBuilder();
+    await refreshAll();
+    toast(
+      `Đã xuất ${result.ordersCreated} đơn với ${result.itemsCreated} dòng sản phẩm.`
+    );
+  } catch (error) {
+    errorElement.textContent = error.message;
+    errorElement.classList.remove("hidden");
+    toast(error.message, "error");
+  } finally {
+    button.disabled = false;
+    button.textContent = "Xác nhận xuất tất cả";
+  }
 });
 
 $("#product-search").addEventListener("input", (event) => {

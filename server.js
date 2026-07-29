@@ -74,11 +74,12 @@ ensureColumn("products", "image_data", "TEXT");
 ensureColumn("transactions", "sales_channel", "TEXT");
 ensureColumn("transactions", "order_code", "TEXT");
 ensureColumn("transactions", "operator_name", "TEXT");
+ensureColumn("transactions", "discount_type", "TEXT");
+ensureColumn("transactions", "discount_value", "REAL NOT NULL DEFAULT 0");
 ensureColumn("users", "display_name", "TEXT");
 db.exec(`
-  CREATE UNIQUE INDEX IF NOT EXISTS idx_transactions_order_code
-  ON transactions(order_code)
-  WHERE kind = 'OUT' AND order_code IS NOT NULL;
+  DROP INDEX IF EXISTS idx_transactions_order_code;
+  CREATE INDEX idx_transactions_order_code ON transactions(order_code);
 `);
 db.prepare(`
   UPDATE users
@@ -219,6 +220,24 @@ function cleanChannel(value) {
     throw new AppError("Kênh bán hàng không hợp lệ.");
   }
   return channel;
+}
+
+function cleanDiscount(typeValue, valueValue, salePrice) {
+  const value = valueValue === undefined || valueValue === ""
+    ? 0
+    : nonNegativeNumber(valueValue, "Giá trị giảm giá");
+  if (value === 0) return { type: null, value: 0 };
+  const type = String(typeValue ?? "").trim().toLowerCase();
+  if (!["percent", "amount"].includes(type)) {
+    throw new AppError("Hình thức giảm giá không hợp lệ.");
+  }
+  if (type === "percent" && value > 100) {
+    throw new AppError("Giảm giá phần trăm không được vượt quá 100%.");
+  }
+  if (type === "amount" && value > salePrice) {
+    throw new AppError("Số tiền giảm trên mỗi sản phẩm không được lớn hơn giá bán.");
+  }
+  return { type, value };
 }
 
 function bootstrapAdmin() {
@@ -395,7 +414,14 @@ function productView(product) {
 function dashboard() {
   const figures = db.prepare(`
     SELECT
-      COALESCE(SUM(CASE WHEN kind = 'OUT' THEN quantity * unit_price ELSE 0 END), 0) AS revenue,
+      COALESCE(SUM(CASE
+        WHEN kind = 'OUT' THEN quantity * CASE
+          WHEN discount_type = 'percent' THEN unit_price * (1 - discount_value / 100.0)
+          WHEN discount_type = 'amount' THEN MAX(0, unit_price - discount_value)
+          ELSE unit_price
+        END
+        ELSE 0
+      END), 0) AS revenue,
       COALESCE(SUM(CASE WHEN kind = 'IN' THEN quantity * unit_price ELSE 0 END), 0) AS purchase_expense,
       COALESCE(SUM(CASE WHEN kind = 'OUT' THEN quantity * unit_cost ELSE 0 END), 0) AS cogs
     FROM transactions
@@ -408,14 +434,14 @@ function dashboard() {
   `).get();
   const recent = db.prepare(`
     SELECT t.id, t.kind, t.quantity, t.unit_price, t.unit_cost, t.sales_channel, t.order_code,
-           t.operator_name,
+           t.operator_name, t.discount_type, t.discount_value,
            t.created_at, p.code, p.name
     FROM transactions t JOIN products p ON p.id = t.product_id
     ORDER BY t.id DESC LIMIT 8
   `).all();
   const channelRanking = db.prepare(`
     SELECT COALESCE(sales_channel, 'unknown') AS channel,
-           COUNT(*) AS orders,
+           COUNT(DISTINCT COALESCE(order_code, 'LEGACY-' || id)) AS orders,
            COALESCE(SUM(quantity), 0) AS units
     FROM transactions
     WHERE kind = 'OUT'
@@ -428,7 +454,9 @@ function dashboard() {
     units: Number(row.units)
   }));
   const productSalesRanking = db.prepare(`
-    SELECT p.code, p.name, COUNT(*) AS orders, COALESCE(SUM(t.quantity), 0) AS units
+    SELECT p.code, p.name,
+           COUNT(DISTINCT COALESCE(t.order_code, 'LEGACY-' || t.id)) AS orders,
+           COALESCE(SUM(t.quantity), 0) AS units
     FROM transactions t
     JOIN products p ON p.id = t.product_id
     WHERE t.kind = 'OUT'
@@ -471,12 +499,27 @@ function dashboard() {
 }
 
 function transactionView(row) {
+  const quantity = Number(row.quantity);
+  const unitPrice = Number(row.unit_price);
+  const discountValue = Number(row.discount_value || 0);
+  const discountType = row.discount_type || null;
+  const grossTotal = quantity * unitPrice;
+  const discountTotal = discountType === "percent"
+    ? grossTotal * discountValue / 100
+    : discountType === "amount"
+      ? quantity * discountValue
+      : 0;
   return {
     id: Number(row.id),
     kind: row.kind,
-    quantity: Number(row.quantity),
-    unitPrice: Number(row.unit_price),
+    quantity,
+    unitPrice,
     unitCost: Number(row.unit_cost),
+    discountType,
+    discountValue,
+    grossTotal,
+    discountTotal,
+    total: Math.max(0, grossTotal - discountTotal),
     channel: row.sales_channel || null,
     orderCode: row.order_code || null,
     operatorName: row.operator_name || null,
@@ -498,7 +541,7 @@ function listProducts(search = "") {
 function listTransactions(limit = 500) {
   return db.prepare(`
     SELECT t.id, t.kind, t.quantity, t.unit_price, t.unit_cost, t.sales_channel, t.order_code,
-           t.operator_name,
+           t.operator_name, t.discount_type, t.discount_value,
            t.created_at, p.code, p.name
     FROM transactions t JOIN products p ON p.id = t.product_id
     ORDER BY t.id DESC LIMIT ?
@@ -570,46 +613,153 @@ function receiveStock(body, user) {
 }
 
 function sellStock(body, user) {
-  const orderCode = cleanOrderCode(body.orderCode);
-  const code = cleanText(body.code, "Mã sản phẩm").toUpperCase();
-  const quantity = positiveInteger(body.quantity, "Số lượng xuất");
-  const salePrice = nonNegativeNumber(body.salePrice, "Giá bán");
   const channel = cleanChannel(body.channel);
-  const product = getProductByCode(code);
-  if (!product) throw new AppError("Không tìm thấy sản phẩm theo mã này.", 404);
-  const existingOrder = db.prepare(`
-    SELECT id FROM transactions WHERE kind = 'OUT' AND order_code = ?
-  `).get(orderCode);
-  if (existingOrder) throw new AppError("Mã đơn hàng này đã tồn tại.");
-  if (Number(product.stock) < quantity) {
-    throw new AppError(`Số lượng tồn không đủ. Hiện còn ${product.stock}.`);
+  const rawOrders = Array.isArray(body.orders)
+    ? body.orders
+    : [{
+      orderCode: body.orderCode,
+      items: [{
+        code: body.code,
+        quantity: body.quantity,
+        salePrice: body.salePrice,
+        discountType: body.discountType,
+        discountValue: body.discountValue
+      }]
+    }];
+  if (rawOrders.length === 0) {
+    throw new AppError("Cần có ít nhất một đơn hàng.");
   }
+  if (rawOrders.length > 20) {
+    throw new AppError("Mỗi lần chỉ được xuất tối đa 20 đơn hàng.");
+  }
+
   const timestamp = now();
   db.exec("BEGIN IMMEDIATE");
   try {
-    db.prepare(`
+    const orderCodes = new Set();
+    const productCache = new Map();
+    const stockRequirements = new Map();
+    const preparedLines = [];
+    let totalLineCount = 0;
+
+    for (const [orderIndex, rawOrder] of rawOrders.entries()) {
+      const orderCode = cleanOrderCode(rawOrder?.orderCode);
+      if (orderCodes.has(orderCode)) {
+        throw new AppError(`Mã đơn ${orderCode} đang bị nhập trùng trong đợt xuất.`);
+      }
+      orderCodes.add(orderCode);
+      const existingOrder = db.prepare(`
+        SELECT id FROM transactions WHERE kind = 'OUT' AND order_code = ? LIMIT 1
+      `).get(orderCode);
+      if (existingOrder) throw new AppError(`Mã đơn hàng ${orderCode} đã tồn tại.`);
+
+      const rawItems = Array.isArray(rawOrder?.items) ? rawOrder.items : [];
+      if (rawItems.length === 0) {
+        throw new AppError(`Đơn ${orderCode} cần có ít nhất một sản phẩm.`);
+      }
+      if (rawItems.length > 50) {
+        throw new AppError(`Đơn ${orderCode} chỉ được có tối đa 50 sản phẩm.`);
+      }
+      totalLineCount += rawItems.length;
+      if (totalLineCount > 200) {
+        throw new AppError("Mỗi lần xuất chỉ được có tối đa 200 dòng sản phẩm.");
+      }
+
+      const orderProductCodes = new Set();
+      for (const [itemIndex, rawItem] of rawItems.entries()) {
+        const code = cleanText(
+          rawItem?.code,
+          `Mã sản phẩm ở dòng ${itemIndex + 1} của đơn ${orderIndex + 1}`
+        ).toUpperCase();
+        if (orderProductCodes.has(code)) {
+          throw new AppError(`Sản phẩm ${code} bị lặp trong đơn ${orderCode}.`);
+        }
+        orderProductCodes.add(code);
+
+        let product = productCache.get(code);
+        if (!product) {
+          product = getProductByCode(code);
+          if (!product) throw new AppError(`Không tìm thấy sản phẩm ${code}.`, 404);
+          productCache.set(code, product);
+        }
+        const quantity = positiveInteger(rawItem?.quantity, `Số lượng của ${code}`);
+        const salePrice = nonNegativeNumber(rawItem?.salePrice, `Giá bán của ${code}`);
+        const discount = cleanDiscount(
+          rawItem?.discountType,
+          rawItem?.discountValue,
+          salePrice
+        );
+        const requirement = stockRequirements.get(product.id) || {
+          product,
+          quantity: 0,
+          salePrice
+        };
+        requirement.quantity += quantity;
+        requirement.salePrice = salePrice;
+        stockRequirements.set(product.id, requirement);
+        preparedLines.push({
+          orderCode,
+          product,
+          quantity,
+          salePrice,
+          discount
+        });
+      }
+    }
+
+    for (const requirement of stockRequirements.values()) {
+      if (Number(requirement.product.stock) < requirement.quantity) {
+        throw new AppError(
+          `Sản phẩm ${requirement.product.code} không đủ tồn kho. ` +
+          `Cần ${requirement.quantity}, hiện còn ${requirement.product.stock}.`
+        );
+      }
+    }
+
+    const updateProduct = db.prepare(`
       UPDATE products SET stock = stock - ?, sale_price = ?, updated_at = ? WHERE id = ?
-    `).run(quantity, salePrice, timestamp, product.id);
-    db.prepare(`
+    `);
+    for (const requirement of stockRequirements.values()) {
+      updateProduct.run(
+        requirement.quantity,
+        requirement.salePrice,
+        timestamp,
+        requirement.product.id
+      );
+    }
+
+    const insertTransaction = db.prepare(`
       INSERT INTO transactions
-        (product_id, kind, quantity, unit_price, unit_cost, sales_channel, order_code, operator_name, created_at)
-      VALUES (?, 'OUT', ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      product.id,
-      quantity,
-      salePrice,
-      Number(product.cost_price),
-      channel,
-      orderCode,
-      user.name,
-      timestamp
-    );
+        (product_id, kind, quantity, unit_price, unit_cost, sales_channel, order_code,
+         operator_name, discount_type, discount_value, created_at)
+      VALUES (?, 'OUT', ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    for (const line of preparedLines) {
+      insertTransaction.run(
+        line.product.id,
+        line.quantity,
+        line.salePrice,
+        Number(line.product.cost_price),
+        channel,
+        line.orderCode,
+        user.name,
+        line.discount.type,
+        line.discount.value,
+        timestamp
+      );
+    }
     db.exec("COMMIT");
+    return {
+      ordersCreated: rawOrders.length,
+      itemsCreated: preparedLines.length,
+      products: [...stockRequirements.values()].map((item) => (
+        productView(getProductByCode(item.product.code))
+      ))
+    };
   } catch (error) {
     db.exec("ROLLBACK");
     throw error;
   }
-  return productView(getProductByCode(code));
 }
 
 function localDateText(date) {
@@ -661,9 +811,13 @@ function salesReport(period, anchor) {
   const range = periodRange(period, anchor);
   const rows = db.prepare(`
     SELECT COALESCE(sales_channel, 'unknown') AS channel,
-           COUNT(*) AS orders,
+           COUNT(DISTINCT COALESCE(order_code, 'LEGACY-' || id)) AS orders,
            COALESCE(SUM(quantity), 0) AS units,
-           COALESCE(SUM(quantity * unit_price), 0) AS revenue,
+           COALESCE(SUM(quantity * CASE
+             WHEN discount_type = 'percent' THEN unit_price * (1 - discount_value / 100.0)
+             WHEN discount_type = 'amount' THEN MAX(0, unit_price - discount_value)
+             ELSE unit_price
+           END), 0) AS revenue,
            COALESCE(SUM(quantity * unit_cost), 0) AS cogs
     FROM transactions
     WHERE kind = 'OUT' AND created_at >= ? AND created_at < ?
@@ -694,15 +848,21 @@ function salesReport(period, anchor) {
   }), { orders: 0, units: 0, revenue: 0, cogs: 0, profit: 0 });
   const transactions = db.prepare(`
     SELECT t.id, t.kind, t.quantity, t.unit_price, t.unit_cost, t.sales_channel, t.order_code,
-           t.operator_name,
+           t.operator_name, t.discount_type, t.discount_value,
            t.created_at, p.code, p.name
     FROM transactions t JOIN products p ON p.id = t.product_id
     WHERE t.kind = 'OUT' AND t.created_at >= ? AND t.created_at < ?
     ORDER BY t.id DESC LIMIT 500
   `).all(range.start, range.end).map(transactionView);
   const products = db.prepare(`
-    SELECT p.code, p.name, COUNT(*) AS orders, COALESCE(SUM(t.quantity), 0) AS units,
-           COALESCE(SUM(t.quantity * t.unit_price), 0) AS revenue
+    SELECT p.code, p.name,
+           COUNT(DISTINCT COALESCE(t.order_code, 'LEGACY-' || t.id)) AS orders,
+           COALESCE(SUM(t.quantity), 0) AS units,
+           COALESCE(SUM(t.quantity * CASE
+             WHEN t.discount_type = 'percent' THEN t.unit_price * (1 - t.discount_value / 100.0)
+             WHEN t.discount_type = 'amount' THEN MAX(0, t.unit_price - t.discount_value)
+             ELSE t.unit_price
+           END), 0) AS revenue
     FROM transactions t
     JOIN products p ON p.id = t.product_id
     WHERE t.kind = 'OUT' AND t.created_at >= ? AND t.created_at < ?

@@ -23,6 +23,8 @@ h1, h2, p, blockquote { margin: 0; }
 .hidden { display: none !important; }
 .eyebrow { color: var(--muted); font-size: 11px; font-weight: 750; letter-spacing: 0.08em; text-transform: uppercase; }
 .optional { color: #91a0a4; font-weight: 500; }
+.required-mark { margin-left: 2px; color: var(--red); font-weight: 900; }
+.field-label { display: inline; }
 
 .login-screen {
   min-height: 100vh;
@@ -256,8 +258,9 @@ td.product-name { color: var(--ink); font-weight: 650; }
 .period-button.active { background: #fff; color: var(--teal); box-shadow: 0 2px 8px rgba(20, 47, 47, 0.08); }
 .date-filter { display: grid; gap: 5px; color: var(--muted); font-size: 11px; font-weight: 700; }
 .date-filter input { width: 155px; }
-.report-detail, .manager-table-card { margin-top: 18px; }
+.report-detail, .manager-table-card, .history-card { margin-top: 18px; }
 .channel-total td { background: #f0f7f6; color: var(--ink); font-weight: 800; }
+.operator-name { color: var(--ink); font-weight: 700; }
 
 .manager-grid { align-items: start; }
 .manager-limit { display: inline-flex; padding: 5px 9px; border-radius: 16px; background: var(--teal-pale); color: var(--teal); font-size: 12px; font-weight: 800; }

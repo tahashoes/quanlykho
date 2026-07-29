@@ -41,6 +41,7 @@ function localDateValue(date = new Date()) {
 const state = {
   currentUser: null,
   products: [],
+  transactions: [],
   dashboard: null,
   report: null,
   managers: [],
@@ -156,6 +157,19 @@ function renderProducts(products = state.products) {
     : `<tr><td colspan="7" class="empty">Chưa tìm thấy sản phẩm.</td></tr>`;
 }
 
+function renderHistories() {
+  const receiptRows = state.transactions.filter((item) => item.kind === "IN");
+  const saleRows = state.transactions.filter((item) => item.kind === "OUT");
+
+  $("#receipt-history-table").innerHTML = receiptRows.length
+    ? receiptRows.map((item) => `<tr><td class="muted">${dateTime.format(new Date(item.createdAt))}</td><td><span class="operator-name">${text(item.operatorName || "Dữ liệu cũ")}</span></td><td>${text(item.code)}</td><td class="product-name">${text(item.name)}</td><td>${item.quantity.toLocaleString("vi-VN")}</td><td>${money.format(item.unitPrice)}</td><td>${money.format(item.quantity * item.unitPrice)}</td></tr>`).join("")
+    : `<tr><td colspan="7" class="empty">Chưa có lịch sử nhập hàng.</td></tr>`;
+
+  $("#sale-history-table").innerHTML = saleRows.length
+    ? saleRows.map((item) => `<tr><td class="muted">${dateTime.format(new Date(item.createdAt))}</td><td><span class="operator-name">${text(item.operatorName || "Dữ liệu cũ")}</span></td><td class="product-name">${text(item.orderCode || "—")}</td><td><span class="channel-chip">${text(channelLabels[item.channel] || "Chưa xác định")}</span></td><td>${text(item.code)}</td><td class="product-name">${text(item.name)}</td><td>${item.quantity.toLocaleString("vi-VN")}</td><td>${money.format(item.unitPrice)}</td><td>${money.format(item.quantity * item.unitPrice)}</td></tr>`).join("")
+    : `<tr><td colspan="9" class="empty">Chưa có lịch sử xuất hàng.</td></tr>`;
+}
+
 function renderReport() {
   const report = state.report;
   if (!report) return;
@@ -226,15 +240,17 @@ function formData(form) {
 }
 
 async function refreshCore() {
-  const requests = [api("/api/dashboard"), api("/api/products")];
+  const requests = [api("/api/dashboard"), api("/api/products"), api("/api/transactions")];
   if (state.currentUser?.role === "admin") requests.push(api("/api/managers"));
-  const [dashboard, products, managers = []] = await Promise.all(requests);
+  const [dashboard, products, transactions, managers = []] = await Promise.all(requests);
   state.dashboard = dashboard;
   state.products = products;
+  state.transactions = transactions;
   state.managers = managers;
   renderDashboard();
   renderProductOptions();
   renderProducts();
+  renderHistories();
   if (state.currentUser?.role === "admin") renderManagers();
 }
 
@@ -342,7 +358,10 @@ function resetManagerForm() {
   form.reset();
   form.elements.password.required = true;
   $("#manager-form-title").textContent = "Thêm tài khoản quản lý";
-  $("#manager-password-note").textContent = "(tối thiểu 8 ký tự)";
+  $("#manager-password-note").textContent = "(tối thiểu 6 ký tự, có ký tự đặc biệt)";
+  $("#manager-password-star").classList.remove("hidden");
+  $("#manager-form-error").textContent = "";
+  $("#manager-form-error").classList.add("hidden");
   form.querySelector("button[type=submit]").textContent = "Thêm quản lý";
   $("#cancel-manager-edit").classList.add("hidden");
 }
@@ -358,6 +377,9 @@ function startManagerEdit(id) {
   form.elements.password.required = false;
   $("#manager-form-title").textContent = "Sửa tài khoản quản lý";
   $("#manager-password-note").textContent = "(để trống nếu giữ mật khẩu cũ)";
+  $("#manager-password-star").classList.add("hidden");
+  $("#manager-form-error").textContent = "";
+  $("#manager-form-error").classList.add("hidden");
   form.querySelector("button[type=submit]").textContent = "Lưu thay đổi";
   $("#cancel-manager-edit").classList.remove("hidden");
   form.elements.phone.focus();
@@ -395,8 +417,8 @@ $("#login-form").addEventListener("submit", async (event) => {
     form.elements.phone.focus();
     return;
   }
-  if (password.length < 8) {
-    errorElement.textContent = "Mật khẩu phải có ít nhất 8 ký tự.";
+  if (password.length < 6) {
+    errorElement.textContent = "Mật khẩu phải có ít nhất 6 ký tự.";
     errorElement.classList.remove("hidden");
     form.elements.password.focus();
     return;
@@ -505,9 +527,44 @@ $("#report-anchor").addEventListener("change", (event) => {
 
 $("#manager-form").addEventListener("submit", async (event) => {
   event.preventDefault();
+  const form = event.currentTarget;
   const editing = state.editingManagerId;
+  const errorElement = $("#manager-form-error");
+  const name = String(form.elements.name.value).trim();
+  const phone = String(form.elements.phone.value).replace(/\s/g, "");
+  const password = form.elements.password.value;
+  errorElement.textContent = "";
+  errorElement.classList.add("hidden");
+
+  let validationMessage = "";
+  let invalidField = null;
+  if (!name) {
+    validationMessage = "Tên người quản lý là trường bắt buộc.";
+    invalidField = form.elements.name;
+  } else if (!/^0\d{9}$/.test(phone)) {
+    validationMessage = "Số điện thoại phải gồm đúng 10 số và bắt đầu bằng số 0.";
+    invalidField = form.elements.phone;
+  } else if (!editing && !password) {
+    validationMessage = "Mật khẩu là trường bắt buộc.";
+    invalidField = form.elements.password;
+  } else if (password && password.length < 6) {
+    validationMessage = "Mật khẩu phải có ít nhất 6 ký tự.";
+    invalidField = form.elements.password;
+  } else if (password && !/[^\p{L}\p{N}\s]/u.test(password)) {
+    validationMessage = "Mật khẩu phải có ít nhất 1 ký tự đặc biệt.";
+    invalidField = form.elements.password;
+  }
+
+  if (validationMessage) {
+    errorElement.textContent = validationMessage;
+    errorElement.classList.remove("hidden");
+    invalidField.focus();
+    return;
+  }
+
+  form.elements.phone.value = phone;
   const saved = await submitForm(
-    event.currentTarget,
+    form,
     editing ? `/api/managers/${editing}` : "/api/managers",
     editing ? "Đã cập nhật tài khoản quản lý." : "Đã thêm tài khoản quản lý.",
     editing ? "PUT" : "POST"

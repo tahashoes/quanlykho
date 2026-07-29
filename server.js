@@ -73,6 +73,7 @@ function ensureColumn(table, column, definition) {
 ensureColumn("products", "image_data", "TEXT");
 ensureColumn("transactions", "sales_channel", "TEXT");
 ensureColumn("transactions", "order_code", "TEXT");
+ensureColumn("transactions", "operator_name", "TEXT");
 ensureColumn("users", "display_name", "TEXT");
 db.exec(`
   CREATE UNIQUE INDEX IF NOT EXISTS idx_transactions_order_code
@@ -156,6 +157,26 @@ function cleanPassword(value, required = true) {
   if (!password && !required) return "";
   if (password.length < 8) {
     throw new AppError("Mật khẩu phải có ít nhất 8 ký tự.");
+  }
+  return password;
+}
+
+function cleanManagerPhone(value) {
+  const phone = String(value ?? "").replace(/\s/g, "");
+  if (!/^0\d{9}$/.test(phone)) {
+    throw new AppError("Số điện thoại quản lý phải gồm đúng 10 số và bắt đầu bằng số 0.");
+  }
+  return phone;
+}
+
+function cleanManagerPassword(value, required = true) {
+  const password = String(value ?? "");
+  if (!password && !required) return "";
+  if (password.length < 6) {
+    throw new AppError("Mật khẩu quản lý phải có ít nhất 6 ký tự.");
+  }
+  if (!/[^\p{L}\p{N}\s]/u.test(password)) {
+    throw new AppError("Mật khẩu quản lý phải có ít nhất 1 ký tự đặc biệt.");
   }
   return password;
 }
@@ -383,6 +404,7 @@ function dashboard() {
   `).get();
   const recent = db.prepare(`
     SELECT t.id, t.kind, t.quantity, t.unit_price, t.unit_cost, t.sales_channel, t.order_code,
+           t.operator_name,
            t.created_at, p.code, p.name
     FROM transactions t JOIN products p ON p.id = t.product_id
     ORDER BY t.id DESC LIMIT 8
@@ -409,6 +431,7 @@ function transactionView(row) {
     unitCost: Number(row.unit_cost),
     channel: row.sales_channel || null,
     orderCode: row.order_code || null,
+    operatorName: row.operator_name || null,
     createdAt: row.created_at,
     code: row.code,
     name: row.name
@@ -424,16 +447,17 @@ function listProducts(search = "") {
   `).all(term, term).map(productView);
 }
 
-function listTransactions(limit = 100) {
+function listTransactions(limit = 500) {
   return db.prepare(`
     SELECT t.id, t.kind, t.quantity, t.unit_price, t.unit_cost, t.sales_channel, t.order_code,
+           t.operator_name,
            t.created_at, p.code, p.name
     FROM transactions t JOIN products p ON p.id = t.product_id
     ORDER BY t.id DESC LIMIT ?
   `).all(limit).map(transactionView);
 }
 
-function addProduct(body) {
+function addProduct(body, user) {
   const code = cleanText(body.code, "Mã sản phẩm").toUpperCase();
   const name = cleanText(body.name, "Tên sản phẩm");
   const quantity = positiveInteger(body.quantity, "Số lượng");
@@ -453,9 +477,9 @@ function addProduct(body) {
     `).run(code, name, quantity, costPrice, salePrice, image, timestamp, timestamp);
     db.prepare(`
       INSERT INTO transactions
-        (product_id, kind, quantity, unit_price, unit_cost, sales_channel, created_at)
-      VALUES (?, 'IN', ?, ?, ?, NULL, ?)
-    `).run(Number(result.lastInsertRowid), quantity, costPrice, costPrice, timestamp);
+        (product_id, kind, quantity, unit_price, unit_cost, sales_channel, operator_name, created_at)
+      VALUES (?, 'IN', ?, ?, ?, NULL, ?, ?)
+    `).run(Number(result.lastInsertRowid), quantity, costPrice, costPrice, user.name, timestamp);
     db.exec("COMMIT");
   } catch (error) {
     db.exec("ROLLBACK");
@@ -464,7 +488,7 @@ function addProduct(body) {
   return productView(getProductByCode(code));
 }
 
-function receiveStock(body) {
+function receiveStock(body, user) {
   const code = cleanText(body.code, "Mã sản phẩm").toUpperCase();
   const quantity = positiveInteger(body.quantity, "Số lượng nhập");
   const costPrice = nonNegativeNumber(body.costPrice, "Đơn giá nhập");
@@ -486,9 +510,9 @@ function receiveStock(body) {
     `).run(newStock, weightedCost, salePrice ?? Number(product.sale_price), timestamp, product.id);
     db.prepare(`
       INSERT INTO transactions
-        (product_id, kind, quantity, unit_price, unit_cost, sales_channel, created_at)
-      VALUES (?, 'IN', ?, ?, ?, NULL, ?)
-    `).run(product.id, quantity, costPrice, costPrice, timestamp);
+        (product_id, kind, quantity, unit_price, unit_cost, sales_channel, operator_name, created_at)
+      VALUES (?, 'IN', ?, ?, ?, NULL, ?, ?)
+    `).run(product.id, quantity, costPrice, costPrice, user.name, timestamp);
     db.exec("COMMIT");
   } catch (error) {
     db.exec("ROLLBACK");
@@ -497,7 +521,7 @@ function receiveStock(body) {
   return productView(getProductByCode(code));
 }
 
-function sellStock(body) {
+function sellStock(body, user) {
   const orderCode = cleanOrderCode(body.orderCode);
   const code = cleanText(body.code, "Mã sản phẩm").toUpperCase();
   const quantity = positiveInteger(body.quantity, "Số lượng xuất");
@@ -520,8 +544,8 @@ function sellStock(body) {
     `).run(quantity, salePrice, timestamp, product.id);
     db.prepare(`
       INSERT INTO transactions
-        (product_id, kind, quantity, unit_price, unit_cost, sales_channel, order_code, created_at)
-      VALUES (?, 'OUT', ?, ?, ?, ?, ?, ?)
+        (product_id, kind, quantity, unit_price, unit_cost, sales_channel, order_code, operator_name, created_at)
+      VALUES (?, 'OUT', ?, ?, ?, ?, ?, ?, ?)
     `).run(
       product.id,
       quantity,
@@ -529,6 +553,7 @@ function sellStock(body) {
       Number(product.cost_price),
       channel,
       orderCode,
+      user.name,
       timestamp
     );
     db.exec("COMMIT");
@@ -621,6 +646,7 @@ function salesReport(period, anchor) {
   }), { orders: 0, units: 0, revenue: 0, cogs: 0, profit: 0 });
   const transactions = db.prepare(`
     SELECT t.id, t.kind, t.quantity, t.unit_price, t.unit_cost, t.sales_channel, t.order_code,
+           t.operator_name,
            t.created_at, p.code, p.name
     FROM transactions t JOIN products p ON p.id = t.product_id
     WHERE t.kind = 'OUT' AND t.created_at >= ? AND t.created_at < ?
@@ -655,8 +681,8 @@ function createManager(body) {
     throw new AppError("Đã đạt giới hạn tối đa 5 tài khoản quản lý.");
   }
   const name = cleanName(body.name);
-  const phone = cleanPhone(body.phone);
-  const password = cleanPassword(body.password);
+  const phone = cleanManagerPhone(body.phone);
+  const password = cleanManagerPassword(body.password);
   const passwordData = hashPassword(password);
   const timestamp = now();
   try {
@@ -680,8 +706,8 @@ function updateManager(id, body) {
   const current = db.prepare("SELECT * FROM users WHERE id = ? AND role = 'manager'").get(id);
   if (!current) throw new AppError("Không tìm thấy tài khoản quản lý.", 404);
   const name = cleanName(body.name);
-  const phone = cleanPhone(body.phone);
-  const password = cleanPassword(body.password, false);
+  const phone = cleanManagerPhone(body.phone);
+  const password = cleanManagerPassword(body.password, false);
   const timestamp = now();
   try {
     if (password) {
@@ -771,13 +797,13 @@ const server = createServer(async (request, response) => {
       );
     }
     if (request.method === "POST" && url.pathname === "/api/products") {
-      return json(response, 201, addProduct(await readJson(request)));
+      return json(response, 201, addProduct(await readJson(request), user));
     }
     if (request.method === "POST" && url.pathname === "/api/receipts") {
-      return json(response, 201, receiveStock(await readJson(request)));
+      return json(response, 201, receiveStock(await readJson(request), user));
     }
     if (request.method === "POST" && url.pathname === "/api/sales") {
-      return json(response, 201, sellStock(await readJson(request)));
+      return json(response, 201, sellStock(await readJson(request), user));
     }
     if (url.pathname === "/api/managers") {
       requireAdmin(user);

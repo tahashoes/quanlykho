@@ -23,7 +23,7 @@
           <label>Số điện thoại<input required name="phone" inputmode="tel" autocomplete="username" placeholder="Nhập số điện thoại" /></label>
           <label>Mật khẩu
             <span class="password-field">
-              <input id="login-password" required name="password" type="password" autocomplete="current-password" placeholder="Nhập mật khẩu" minlength="8" />
+              <input id="login-password" required name="password" type="password" autocomplete="current-password" placeholder="Nhập mật khẩu" minlength="6" />
               <button class="password-toggle" type="button" data-toggle-password="login-password" aria-label="Hiện mật khẩu" title="Hiện mật khẩu">◉</button>
             </span>
           </label>
@@ -108,6 +108,10 @@
               </form>
             </article>
           </div>
+          <article class="card full-card history-card">
+            <div class="card-heading"><div><p class="eyebrow">Nhật ký kho</p><h2>Lịch sử nhập hàng</h2></div></div>
+            <div class="table-wrap"><table><thead><tr><th>Thời gian cập nhật</th><th>Người nhập</th><th>Mã sản phẩm</th><th>Tên sản phẩm</th><th>Số lượng</th><th>Đơn giá nhập</th><th>Thành tiền</th></tr></thead><tbody id="receipt-history-table"></tbody></table></div>
+          </article>
         </section>
 
         <section class="view" id="sales-view">
@@ -140,6 +144,10 @@
               <div class="channel-cloud"><span>Facebook</span><span>Zalo</span><span>TikTok</span><span>Shopee</span><span>Website</span><span>Lazada</span></div>
             </article>
           </div>
+          <article class="card full-card history-card">
+            <div class="card-heading"><div><p class="eyebrow">Nhật ký bán hàng</p><h2>Lịch sử xuất hàng</h2></div></div>
+            <div class="table-wrap"><table><thead><tr><th>Thời gian xuất</th><th>Người xuất</th><th>Mã đơn</th><th>Kênh</th><th>Mã sản phẩm</th><th>Tên sản phẩm</th><th>Số lượng</th><th>Giá bán</th><th>Thành tiền</th></tr></thead><tbody id="sale-history-table"></tbody></table></div>
+          </article>
         </section>
 
         <section class="view" id="inventory-view">
@@ -170,15 +178,16 @@
           <div class="content-grid manager-grid">
             <article class="card">
               <div class="card-heading"><div><p class="eyebrow">Phân quyền</p><h2 id="manager-form-title">Thêm tài khoản quản lý</h2></div><span class="manager-limit" id="manager-limit">0/5</span></div>
-              <form id="manager-form" class="manager-form">
-                <label>Tên người quản lý<input required name="name" maxlength="120" placeholder="VD: Nguyễn Văn An" /></label>
-                <label>Số điện thoại<input required name="phone" inputmode="tel" placeholder="VD: 0912345678" /></label>
-                <label>Mật khẩu <span class="optional" id="manager-password-note">(tối thiểu 8 ký tự)</span>
+              <form id="manager-form" class="manager-form" novalidate>
+                <label><span class="field-label">Tên người quản lý <span class="required-mark" aria-hidden="true">*</span></span><input required name="name" maxlength="120" placeholder="VD: Nguyễn Văn An" /></label>
+                <label><span class="field-label">Số điện thoại <span class="required-mark" aria-hidden="true">*</span></span><input required name="phone" inputmode="numeric" autocomplete="tel" maxlength="10" pattern="0[0-9]{9}" placeholder="VD: 0912345678" /></label>
+                <label><span class="field-label">Mật khẩu <span class="required-mark" id="manager-password-star" aria-hidden="true">*</span> <span class="optional" id="manager-password-note">(tối thiểu 6 ký tự, có ký tự đặc biệt)</span></span>
                   <span class="password-field">
-                    <input id="manager-password" required name="password" type="password" autocomplete="new-password" placeholder="Nhập mật khẩu" minlength="8" />
+                    <input id="manager-password" required name="password" type="password" autocomplete="new-password" placeholder="Nhập mật khẩu" minlength="6" />
                     <button class="password-toggle" type="button" data-toggle-password="manager-password" aria-label="Hiện mật khẩu" title="Hiện mật khẩu">◉</button>
                   </span>
                 </label>
+                <p class="form-error hidden" id="manager-form-error"></p>
                 <div class="form-actions"><button class="button button-primary" type="submit">Thêm quản lý</button><button class="button button-ghost hidden" type="button" id="cancel-manager-edit">Hủy sửa</button></div>
               </form>
             </article>

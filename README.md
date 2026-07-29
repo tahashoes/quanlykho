@@ -1,48 +1,86 @@
-# Kho Hàng — Quản lý hàng hóa
+# Kho Hàng — Quản lý hàng hóa đa kênh
 
-Ứng dụng quản lý kho đơn giản, chạy độc lập trên VPS. Giao diện hoàn toàn bằng tiếng Việt và dữ liệu được lưu bền vững bằng SQLite.
+Ứng dụng quản lý kho dành cho cửa hàng nhỏ và vừa, chạy độc lập trên VPS. Dữ liệu được lưu bền vững bằng SQLite, giao diện hoàn toàn bằng tiếng Việt và có phân quyền đăng nhập.
 
 ## Chức năng
 
-- Thêm hàng hóa: mã sản phẩm, tên, số lượng, đơn giá nhập, giá bán.
-- Nhập thêm hàng cho sản phẩm đã có; giá nhập bình quân sẽ được cập nhật tự động.
-- Xuất hàng theo mã sản phẩm, ghi nhận tên, số lượng và giá bán.
+- Thêm hàng hóa: mã sản phẩm, tên, số lượng, đơn giá nhập, giá bán và ảnh sản phẩm tùy chọn.
+- Nhập thêm hàng; giá nhập bình quân được cập nhật tự động.
+- Xuất hàng theo 6 kênh: Facebook, Zalo, TikTok, Shopee, Website và Lazada.
 - Tồn kho giảm ngay khi xuất; không thể xuất vượt quá số lượng hiện có.
-- Báo cáo tổng quan: doanh thu, chi phí nhập, giá vốn hàng bán, lợi nhuận, giá trị tồn, hàng sắp hết và nhật ký giao dịch.
-- Mã bảo vệ API tùy chọn để bảo vệ trang khi triển khai công khai.
+- Báo cáo theo ngày, tuần hoặc tháng:
+  - doanh thu và lợi nhuận;
+  - số đơn hàng bán ra;
+  - tổng số lượng sản phẩm bán ra;
+  - thống kê riêng từng kênh và tổng tất cả các kênh.
+- Đăng nhập bằng số điện thoại và mật khẩu.
+- Admin có thể thêm, sửa và xóa tối đa 5 tài khoản quản lý.
+- Quản lý được nhập hàng, xuất hàng, xem tồn kho và báo cáo nhưng không được quản lý tài khoản.
+
+Mỗi lần xác nhận **Xuất hàng** được tính là một đơn hàng. Số sản phẩm bán ra là tổng số lượng của các đơn.
 
 ## Công nghệ
 
-- **Node.js 24**: máy chủ HTTP nhẹ, không cần cài framework hay phụ thuộc ngoài.
-- **SQLite**: một tệp dữ liệu duy nhất, rất phù hợp cho cửa hàng nhỏ và vừa; được lưu trên ổ đĩa VPS.
-- **HTML/CSS/JavaScript thuần**: giao diện nhanh, không cần bước biên dịch, dễ bảo trì.
-- **Docker Compose**: khởi chạy bằng một lệnh và dễ sao lưu/chuyển VPS.
+- **Node.js 24**: máy chủ HTTP nhẹ, không cần phụ thuộc ngoài.
+- **SQLite**: dữ liệu nằm trong một tệp, dễ sao lưu và phù hợp cửa hàng nhỏ hoặc vừa.
+- **HTML/CSS/JavaScript thuần**: giao diện nhanh, không cần bước biên dịch.
+- **Docker Compose**: triển khai và cập nhật bằng một lệnh.
 
-## Chạy trên VPS bằng Docker
+Mật khẩu được băm bằng `scrypt`; phiên đăng nhập được lưu bằng cookie `HttpOnly`, `SameSite=Lax`.
 
-1. Cài Docker Engine và Docker Compose trên VPS.
-2. Sao chép mã nguồn lên máy chủ (hoặc clone từ GitHub sau khi đã xuất bản).
-3. Mở `compose.yaml`, đổi giá trị `INVENTORY_API_TOKEN` thành một mã bí mật mạnh.
-4. Khởi chạy:
+## Chạy thử trên máy
+
+Yêu cầu Node.js 24 trở lên:
+
+```bash
+node server.js
+```
+
+Mở `http://localhost:3000`. Khi chạy thử không đặt `NODE_ENV=production`, tài khoản mặc định là:
+
+- Số điện thoại: `0900000000`
+- Mật khẩu: `Admin@123`
+
+Không sử dụng tài khoản mặc định này cho môi trường thực tế.
+
+## Triển khai VPS bằng Docker
+
+1. Cài Docker Engine và Docker Compose.
+2. Clone repository và vào thư mục dự án.
+3. Tạo cấu hình môi trường:
+
+   ```bash
+   cp .env.example .env
+   ```
+
+4. Mở `.env`, thay `ADMIN_PHONE` và `ADMIN_PASSWORD` bằng thông tin admin thật. Mật khẩu phải có ít nhất 8 ký tự.
+5. Khởi chạy:
 
    ```bash
    docker compose up -d --build
    ```
 
-5. Mở `http://IP-VPS:3000`, chọn **Thiết lập bảo mật** và nhập đúng mã bí mật đã đặt ở bước 3.
+6. Mở `http://IP-VPS:3000` và đăng nhập bằng tài khoản admin trong `.env`.
 
-Sau khi thay đổi mã nguồn, cập nhật bằng:
+Khi đã cấu hình tên miền và HTTPS qua Nginx hoặc Caddy, đổi `COOKIE_SECURE=true` trong `.env` rồi chạy lại:
 
 ```bash
-docker compose up -d --build
+docker compose up -d
 ```
 
-## Sao lưu dữ liệu
+## Sao lưu
 
-Toàn bộ dữ liệu nằm trong thư mục `data/`, đặc biệt là tệp `data/quanlykho.db`. Sao chép thư mục này sang vị trí an toàn để sao lưu. Nên sao lưu khi ứng dụng ít giao dịch hoặc dừng container ngắn hạn để có một bản sao nhất quán.
+Toàn bộ dữ liệu và tài khoản nằm trong `data/quanlykho.db`. Sao chép thư mục `data/` sang vị trí an toàn để sao lưu. Nên dừng container ngắn hạn trước khi sao chép để có bản sao nhất quán:
 
-## Lưu ý bảo mật khi triển khai thật
+```bash
+docker compose stop
+cp -r data data-backup
+docker compose start
+```
 
-- Luôn đổi `INVENTORY_API_TOKEN`; không đưa mã bí mật vào GitHub.
-- Dùng tường lửa chỉ mở cổng cần thiết hoặc đặt Nginx/Caddy với HTTPS trước ứng dụng.
-- Nếu thay đổi token, người dùng cần nhập lại token tại nút **Thiết lập bảo mật**.
+## Lưu ý bảo mật
+
+- Không commit tệp `.env` lên GitHub.
+- Dùng mật khẩu admin mạnh và riêng biệt.
+- Đặt Nginx hoặc Caddy với HTTPS trước ứng dụng khi đưa lên Internet.
+- Chỉ bật `COOKIE_SECURE=true` sau khi website đã truy cập qua HTTPS.

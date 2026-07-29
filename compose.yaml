@@ -3,12 +3,14 @@ services:
     build: .
     container_name: quanlykho
     restart: unless-stopped
+    env_file:
+      - .env
     ports:
       - "3000:3000"
     environment:
       PORT: "3000"
       DB_PATH: /app/data/quanlykho.db
-      # Đổi chuỗi này trước khi triển khai thật, sau đó nhập cùng mã trong nút "Thiết lập bảo mật".
-      INVENTORY_API_TOKEN: "doi-ma-bao-ve-cua-ban"
+      TZ: Asia/Ho_Chi_Minh
+      COOKIE_SECURE: "${COOKIE_SECURE:-false}"
     volumes:
       - ./data:/app/data

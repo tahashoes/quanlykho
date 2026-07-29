@@ -100,9 +100,13 @@ const contentTypes = {
   ".css": "text/css; charset=utf-8",
   ".html": "text/html; charset=utf-8",
   ".ico": "image/x-icon",
+  ".jpeg": "image/jpeg",
+  ".jpg": "image/jpeg",
   ".js": "text/javascript; charset=utf-8",
   ".json": "application/json; charset=utf-8",
-  ".svg": "image/svg+xml"
+  ".png": "image/png",
+  ".svg": "image/svg+xml",
+  ".webp": "image/webp"
 };
 
 function now() {
@@ -409,6 +413,45 @@ function dashboard() {
     FROM transactions t JOIN products p ON p.id = t.product_id
     ORDER BY t.id DESC LIMIT 8
   `).all();
+  const channelRanking = db.prepare(`
+    SELECT COALESCE(sales_channel, 'unknown') AS channel,
+           COUNT(*) AS orders,
+           COALESCE(SUM(quantity), 0) AS units
+    FROM transactions
+    WHERE kind = 'OUT'
+      AND sales_channel IN ('facebook', 'zalo', 'tiktok', 'shopee', 'website', 'lazada')
+    GROUP BY COALESCE(sales_channel, 'unknown')
+    ORDER BY orders DESC, units DESC, channel ASC
+  `).all().map((row) => ({
+    channel: row.channel,
+    orders: Number(row.orders),
+    units: Number(row.units)
+  }));
+  const productSalesRanking = db.prepare(`
+    SELECT p.code, p.name, COUNT(*) AS orders, COALESCE(SUM(t.quantity), 0) AS units
+    FROM transactions t
+    JOIN products p ON p.id = t.product_id
+    WHERE t.kind = 'OUT'
+    GROUP BY t.product_id, p.code, p.name
+    ORDER BY units DESC, orders DESC, p.name ASC
+    LIMIT 5
+  `).all().map((row) => ({
+    code: row.code,
+    name: row.name,
+    orders: Number(row.orders),
+    units: Number(row.units)
+  }));
+  const inventoryRanking = db.prepare(`
+    SELECT code, name, stock
+    FROM products
+    WHERE stock > 0
+    ORDER BY stock DESC, name ASC
+    LIMIT 5
+  `).all().map((row) => ({
+    code: row.code,
+    name: row.name,
+    stock: Number(row.stock)
+  }));
   return {
     revenue: Number(figures.revenue),
     purchaseExpense: Number(figures.purchase_expense),
@@ -418,7 +461,12 @@ function dashboard() {
     totalUnits: Number(inventory.total_units),
     inventoryValue: Number(inventory.inventory_value),
     lowStockCount: Number(inventory.low_stock_count),
-    recent: recent.map(transactionView)
+    recent: recent.map(transactionView),
+    rankings: {
+      channels: channelRanking,
+      soldProducts: productSalesRanking,
+      inventoryProducts: inventoryRanking
+    }
   };
 }
 
@@ -652,7 +700,23 @@ function salesReport(period, anchor) {
     WHERE t.kind = 'OUT' AND t.created_at >= ? AND t.created_at < ?
     ORDER BY t.id DESC LIMIT 500
   `).all(range.start, range.end).map(transactionView);
-  return { range, channels, totals, transactions };
+  const products = db.prepare(`
+    SELECT p.code, p.name, COUNT(*) AS orders, COALESCE(SUM(t.quantity), 0) AS units,
+           COALESCE(SUM(t.quantity * t.unit_price), 0) AS revenue
+    FROM transactions t
+    JOIN products p ON p.id = t.product_id
+    WHERE t.kind = 'OUT' AND t.created_at >= ? AND t.created_at < ?
+    GROUP BY t.product_id, p.code, p.name
+    ORDER BY units DESC, revenue DESC, p.name ASC
+    LIMIT 10
+  `).all(range.start, range.end).map((row) => ({
+    code: row.code,
+    name: row.name,
+    orders: Number(row.orders),
+    units: Number(row.units),
+    revenue: Number(row.revenue)
+  }));
+  return { range, channels, totals, products, transactions };
 }
 
 function managerView(user) {

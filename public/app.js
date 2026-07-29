@@ -91,6 +91,34 @@ function metric(label, value, note, accent = false) {
   return `<article class="metric${accent ? " teal" : ""}"><span class="metric-label">${text(label)}</span><strong>${text(value)}</strong><small>${text(note)}</small></article>`;
 }
 
+function rankedChart(items, options) {
+  const rows = items.map((item) => ({
+    item,
+    value: Math.max(0, Number(options.value(item)) || 0)
+  }));
+  const maximum = Math.max(0, ...rows.map((row) => row.value));
+  if (!rows.length || maximum === 0) {
+    return `<p class="chart-empty">${text(options.emptyMessage)}</p>`;
+  }
+  const minimum = Math.min(...rows.map((row) => row.value));
+  return rows.map((row, index) => {
+    const width = row.value === 0 ? 0 : Math.max(4, Math.round((row.value / maximum) * 100));
+    const isBest = Boolean(options.highlightExtremes) && row.value === maximum;
+    const isLeast = Boolean(options.highlightExtremes) && minimum !== maximum && row.value === minimum;
+    const stateClass = isBest ? " best" : isLeast ? " least" : "";
+    const stateLabel = isBest ? "Nhiều nhất" : isLeast ? "Ít nhất" : "";
+    return `<div class="ranked-item${stateClass}">
+      <div class="ranked-head">
+        <span class="ranked-position">${index + 1}</span>
+        <span class="ranked-name"><strong>${text(options.label(row.item))}</strong><small>${text(options.detail(row.item))}</small></span>
+        <span class="ranked-value">${text(options.formatValue(row.value))}</span>
+      </div>
+      <div class="ranked-track" aria-hidden="true"><span class="ranked-fill" style="width:${width}%"></span></div>
+      ${stateLabel ? `<span class="ranked-state">${stateLabel}</span>` : ""}
+    </div>`;
+  }).join("");
+}
+
 function showLogin() {
   state.currentUser = null;
   $("#login-screen").classList.remove("hidden");
@@ -121,6 +149,36 @@ function renderDashboard() {
     metric("Giá trị tồn kho", money.format(report.inventoryValue), `${report.totalUnits} đơn vị trong kho`),
     metric("Sản phẩm", report.skuCount.toLocaleString("vi-VN"), `${report.lowStockCount} sản phẩm sắp hết`)
   ].join("");
+
+  const rankings = report.rankings || {
+    channels: [],
+    soldProducts: [],
+    inventoryProducts: []
+  };
+  $("#dashboard-channel-chart").innerHTML = rankedChart(rankings.channels, {
+    value: (item) => item.orders,
+    label: (item) => channelLabels[item.channel] || item.channel,
+    detail: (item) => `${item.units.toLocaleString("vi-VN")} sản phẩm`,
+    formatValue: (value) => `${value.toLocaleString("vi-VN")} đơn`,
+    emptyMessage: "Chưa có đơn hàng để xếp hạng.",
+    highlightExtremes: true
+  });
+  $("#dashboard-product-chart").innerHTML = rankedChart(rankings.soldProducts, {
+    value: (item) => item.units,
+    label: (item) => item.name,
+    detail: (item) => `${item.code} · ${item.orders.toLocaleString("vi-VN")} đơn`,
+    formatValue: (value) => `${value.toLocaleString("vi-VN")} SP`,
+    emptyMessage: "Chưa có sản phẩm bán ra.",
+    highlightExtremes: false
+  });
+  $("#dashboard-inventory-chart").innerHTML = rankedChart(rankings.inventoryProducts, {
+    value: (item) => item.stock,
+    label: (item) => item.name,
+    detail: (item) => item.code,
+    formatValue: (value) => `${value.toLocaleString("vi-VN")} tồn`,
+    emptyMessage: "Kho hiện chưa có sản phẩm.",
+    highlightExtremes: false
+  });
 
   const lowProducts = state.products
     .filter((product) => product.stock <= 5)
@@ -182,6 +240,25 @@ function renderReport() {
     metric("Số đơn hàng", report.totals.orders.toLocaleString("vi-VN"), "Mỗi lần xuất là một đơn"),
     metric("Sản phẩm bán ra", report.totals.units.toLocaleString("vi-VN"), "Tổng số lượng trong các đơn")
   ].join("");
+  const channelRanking = report.channels.filter((item) => item.channel !== "unknown").sort(
+    (left, right) => right.orders - left.orders || right.units - left.units
+  );
+  $("#report-channel-chart").innerHTML = rankedChart(channelRanking, {
+    value: (item) => item.orders,
+    label: (item) => channelLabels[item.channel] || item.channel,
+    detail: (item) => `${item.units.toLocaleString("vi-VN")} sản phẩm · ${money.format(item.revenue)}`,
+    formatValue: (value) => `${value.toLocaleString("vi-VN")} đơn`,
+    emptyMessage: "Chưa có đơn hàng trong khoảng thời gian này.",
+    highlightExtremes: true
+  });
+  $("#report-product-chart").innerHTML = rankedChart((report.products || []).slice(0, 5), {
+    value: (item) => item.units,
+    label: (item) => item.name,
+    detail: (item) => `${item.code} · ${money.format(item.revenue)}`,
+    formatValue: (value) => `${value.toLocaleString("vi-VN")} SP`,
+    emptyMessage: "Chưa có sản phẩm bán ra trong khoảng thời gian này.",
+    highlightExtremes: false
+  });
   const channelRows = report.channels.map((item) => `<tr><td><span class="channel-chip">${text(channelLabels[item.channel] || item.channel)}</span></td><td>${item.orders.toLocaleString("vi-VN")}</td><td>${item.units.toLocaleString("vi-VN")}</td><td>${money.format(item.revenue)}</td><td>${money.format(item.profit)}</td></tr>`).join("");
   $("#channel-table").innerHTML = `${channelRows}<tr class="channel-total"><td>TỔNG TẤT CẢ KÊNH</td><td>${report.totals.orders.toLocaleString("vi-VN")}</td><td>${report.totals.units.toLocaleString("vi-VN")}</td><td>${money.format(report.totals.revenue)}</td><td>${money.format(report.totals.profit)}</td></tr>`;
   $("#transaction-table").innerHTML = report.transactions.length

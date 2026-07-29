@@ -4,19 +4,20 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#0f766e" />
-    <title>Kho Hàng | Quản lý kho</title>
+    <title>KHO HÀNG TAHA SHOES | Quản lý kho</title>
+    <link rel="icon" href="/taha-shoes-logo.jpg" />
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
     <section class="login-screen" id="login-screen">
       <div class="login-panel">
         <div class="login-brand">
-          <span class="brand-mark">K</span>
-          <div><strong>Kho Hàng</strong><small>Quản lý thông minh</small></div>
+          <img class="brand-logo" src="/taha-shoes-logo.jpg" alt="Logo TAHA SHOES" />
+          <div><strong>KHO HÀNG TAHA SHOES</strong><small>Quản lý thông minh</small></div>
         </div>
         <div class="login-copy">
           <p class="eyebrow">Đăng nhập hệ thống</p>
-          <h1>Chào mừng trở lại</h1>
+          <h1>Chào mừng đến TAHA SHOES</h1>
           <p>Sử dụng tài khoản admin hoặc quản lý đã được cấp để tiếp tục.</p>
         </div>
         <form id="login-form" class="login-form">
@@ -40,9 +41,9 @@
 
     <div class="app-shell hidden" id="app-shell">
       <aside class="sidebar">
-        <a class="brand" href="#dashboard" aria-label="Kho Hàng">
-          <span class="brand-mark">K</span>
-          <span>Kho Hàng<small>Quản lý thông minh</small></span>
+        <a class="brand" href="#dashboard" aria-label="KHO HÀNG TAHA SHOES">
+          <img class="brand-logo" src="/taha-shoes-logo.jpg" alt="" />
+          <span>KHO HÀNG<small>TAHA SHOES</small></span>
         </a>
         <nav class="nav" aria-label="Điều hướng chính">
           <button class="nav-link active" data-view="dashboard">Tổng quan</button>
@@ -69,6 +70,20 @@
 
         <section class="view active" id="dashboard-view">
           <div class="metric-grid" id="dashboard-metrics"></div>
+          <div class="analytics-grid dashboard-analytics">
+            <article class="card chart-card">
+              <div class="card-heading"><div><p class="eyebrow">Toàn thời gian</p><h2>Kênh có nhiều đơn nhất</h2></div></div>
+              <div class="ranked-chart" id="dashboard-channel-chart"></div>
+            </article>
+            <article class="card chart-card">
+              <div class="card-heading"><div><p class="eyebrow">Toàn thời gian</p><h2>Sản phẩm bán ra nhiều nhất</h2></div></div>
+              <div class="ranked-chart" id="dashboard-product-chart"></div>
+            </article>
+            <article class="card chart-card">
+              <div class="card-heading"><div><p class="eyebrow">Tồn kho hiện tại</p><h2>Sản phẩm còn nhiều nhất</h2></div></div>
+              <div class="ranked-chart" id="dashboard-inventory-chart"></div>
+            </article>
+          </div>
           <div class="content-grid dashboard-grid">
             <article class="card">
               <div class="card-heading"><div><p class="eyebrow">Cảnh báo</p><h2>Sản phẩm sắp hết</h2></div><button class="text-button" data-go="inventory">Xem tồn kho</button></div>
@@ -164,6 +179,16 @@
             <label class="date-filter">Chọn ngày<input id="report-anchor" type="date" /></label>
           </article>
           <div class="metric-grid report-metrics" id="report-metrics"></div>
+          <div class="analytics-grid report-analytics">
+            <article class="card chart-card">
+              <div class="card-heading"><div><p class="eyebrow">So sánh số đơn</p><h2>Kênh bán nhiều nhất và ít nhất</h2></div></div>
+              <div class="ranked-chart" id="report-channel-chart"></div>
+            </article>
+            <article class="card chart-card">
+              <div class="card-heading"><div><p class="eyebrow">Xếp hạng số lượng</p><h2>Sản phẩm bán nhiều nhất</h2></div></div>
+              <div class="ranked-chart" id="report-product-chart"></div>
+            </article>
+          </div>
           <article class="card full-card channel-report">
             <div class="card-heading"><div><p class="eyebrow">Hiệu quả kênh bán</p><h2>Thống kê theo từng kênh</h2></div></div>
             <div class="table-wrap"><table><thead><tr><th>Kênh bán</th><th>Số đơn</th><th>Sản phẩm bán ra</th><th>Doanh thu</th><th>Lợi nhuận</th></tr></thead><tbody id="channel-table"></tbody></table></div>

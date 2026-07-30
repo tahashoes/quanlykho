@@ -40,6 +40,7 @@ function localDateValue(date = new Date()) {
 
 const state = {
   currentUser: null,
+  categories: [],
   products: [],
   transactions: [],
   dashboard: null,
@@ -86,6 +87,28 @@ function text(value) {
     "'": "&#39;",
     "\"": "&quot;"
   })[char]);
+}
+
+function categoryById(id) {
+  return state.categories.find((category) => category.id === Number(id));
+}
+
+function variantLabel(product) {
+  return [
+    product.size ? `Size ${product.size}` : "",
+    product.color ? `Màu ${product.color}` : ""
+  ].filter(Boolean).join(" · ") || "—";
+}
+
+function productOptionLabel(product) {
+  const variant = variantLabel(product);
+  return `${product.code}${variant === "—" ? "" : ` · ${variant}`} · còn ${product.stock} ${product.unit}`;
+}
+
+function categoryOptions(selectedId = "") {
+  return `<option value="">Chọn danh mục</option>${state.categories.map((category) => (
+    `<option value="${category.id}"${Number(selectedId) === category.id ? " selected" : ""}>${text(category.name)}</option>`
+  )).join("")}`;
 }
 
 function discountLabel(item) {
@@ -246,8 +269,16 @@ function renderDashboard() {
 
 function renderProductOptions() {
   $("#product-codes").innerHTML = state.products
-    .map((product) => `<option value="${text(product.code)}">${text(product.name)}</option>`)
+    .map((product) => `<option value="${text(product.code)}">${text(productOptionLabel(product))}</option>`)
     .join("");
+  document.querySelectorAll("[data-sale-item]").forEach((item) => {
+    const categorySelect = item.querySelector("[data-sale-field='categoryId']");
+    const selectedCategory = categorySelect.value;
+    categorySelect.innerHTML = categoryOptions(selectedCategory);
+    updateSaleProductOptions(item);
+    updateSaleItem(item);
+  });
+  updateSaleBuilderSummary();
 }
 
 function renderProducts(products = state.products) {
@@ -256,9 +287,9 @@ function renderProducts(products = state.products) {
       const visual = product.image
         ? `<img class="product-thumb" src="${product.image}" alt="" />`
         : `<span class="product-placeholder">${text(product.name.slice(0, 1).toUpperCase())}</span>`;
-      return `<tr><td><div class="product-cell">${visual}<span class="product-name">${text(product.name)}</span></div></td><td>${text(product.code)}</td><td><span class="stock${product.stock <= 5 ? " low" : ""}">${product.stock}</span></td><td>${money.format(product.costPrice)}</td><td>${money.format(product.salePrice)}</td><td>${money.format(product.inventoryValue)}</td><td class="muted">${dateTime.format(new Date(product.updatedAt))}</td></tr>`;
+      return `<tr><td><div class="product-cell">${visual}<span class="product-name">${text(product.name)}</span></div></td><td><span class="category-chip">${text(product.categoryName)}</span></td><td>${text(product.code)}</td><td>${text(variantLabel(product))}</td><td><span class="stock${product.stock <= 5 ? " low" : ""}">${product.stock}</span></td><td>${text(product.unit)}</td><td>${money.format(product.costPrice)}</td><td>${product.salePrice ? money.format(product.salePrice) : "—"}</td><td>${money.format(product.inventoryValue)}</td><td class="muted">${dateTime.format(new Date(product.updatedAt))}</td></tr>`;
     }).join("")
-    : `<tr><td colspan="7" class="empty">Chưa tìm thấy sản phẩm.</td></tr>`;
+    : `<tr><td colspan="10" class="empty">Chưa tìm thấy sản phẩm.</td></tr>`;
 }
 
 function renderHistories() {
@@ -266,12 +297,12 @@ function renderHistories() {
   const saleRows = state.transactions.filter((item) => item.kind === "OUT");
 
   $("#receipt-history-table").innerHTML = receiptRows.length
-    ? receiptRows.map((item) => `<tr><td class="muted">${dateTime.format(new Date(item.createdAt))}</td><td><span class="operator-name">${text(item.operatorName || "Dữ liệu cũ")}</span></td><td>${text(item.code)}</td><td class="product-name">${text(item.name)}</td><td>${item.quantity.toLocaleString("vi-VN")}</td><td>${money.format(item.unitPrice)}</td><td>${money.format(item.quantity * item.unitPrice)}</td></tr>`).join("")
-    : `<tr><td colspan="7" class="empty">Chưa có lịch sử nhập hàng.</td></tr>`;
+    ? receiptRows.map((item) => `<tr><td class="muted">${dateTime.format(new Date(item.createdAt))}</td><td><span class="operator-name">${text(item.operatorName || "Dữ liệu cũ")}</span></td><td><span class="category-chip">${text(item.categoryName)}</span></td><td>${text(item.code)}</td><td>${text(variantLabel(item))}</td><td>${item.quantity.toLocaleString("vi-VN")}</td><td>${text(item.unit)}</td><td>${money.format(item.unitPrice)}</td><td>${money.format(item.quantity * item.unitPrice)}</td></tr>`).join("")
+    : `<tr><td colspan="9" class="empty">Chưa có lịch sử nhập hàng.</td></tr>`;
 
   $("#sale-history-table").innerHTML = saleRows.length
-    ? saleRows.map((item) => `<tr><td class="muted">${dateTime.format(new Date(item.createdAt))}</td><td><span class="operator-name">${text(item.operatorName || "Dữ liệu cũ")}</span></td><td class="product-name">${text(item.orderCode || "—")}</td><td><span class="channel-chip">${text(channelLabels[item.channel] || "Chưa xác định")}</span></td><td>${text(item.code)}</td><td class="product-name">${text(item.name)}</td><td>${item.quantity.toLocaleString("vi-VN")}</td><td>${money.format(item.unitPrice)}</td><td>${text(discountLabel(item))}</td><td>${money.format(item.total ?? item.quantity * item.unitPrice)}</td></tr>`).join("")
-    : `<tr><td colspan="10" class="empty">Chưa có lịch sử xuất hàng.</td></tr>`;
+    ? saleRows.map((item) => `<tr><td class="muted">${dateTime.format(new Date(item.createdAt))}</td><td><span class="operator-name">${text(item.operatorName || "Dữ liệu cũ")}</span></td><td class="product-name">${text(item.orderCode || "—")}</td><td><span class="channel-chip">${text(channelLabels[item.channel] || "Chưa xác định")}</span></td><td><span class="category-chip">${text(item.categoryName)}</span></td><td>${text(item.code)}</td><td>${text(variantLabel(item))}</td><td>${item.quantity.toLocaleString("vi-VN")}</td><td>${text(item.unit)}</td><td>${money.format(item.unitPrice)}</td><td>${text(discountLabel(item))}</td><td>${money.format(item.total ?? item.quantity * item.unitPrice)}</td></tr>`).join("")
+    : `<tr><td colspan="12" class="empty">Chưa có lịch sử xuất hàng.</td></tr>`;
 }
 
 function renderReport() {
@@ -308,8 +339,8 @@ function renderReport() {
   const channelRows = report.channels.map((item) => `<tr><td><span class="channel-chip">${text(channelLabels[item.channel] || item.channel)}</span></td><td>${item.orders.toLocaleString("vi-VN")}</td><td>${item.units.toLocaleString("vi-VN")}</td><td>${money.format(item.revenue)}</td><td>${money.format(item.profit)}</td></tr>`).join("");
   $("#channel-table").innerHTML = `${channelRows}<tr class="channel-total"><td>TỔNG TẤT CẢ KÊNH</td><td>${report.totals.orders.toLocaleString("vi-VN")}</td><td>${report.totals.units.toLocaleString("vi-VN")}</td><td>${money.format(report.totals.revenue)}</td><td>${money.format(report.totals.profit)}</td></tr>`;
   $("#transaction-table").innerHTML = report.transactions.length
-    ? report.transactions.map((item) => `<tr><td class="muted">${dateTime.format(new Date(item.createdAt))}</td><td class="product-name">${text(item.orderCode || "—")}</td><td><span class="channel-chip">${text(channelLabels[item.channel] || "Chưa xác định")}</span></td><td>${text(item.code)}</td><td class="product-name">${text(item.name)}</td><td>${item.quantity}</td><td>${money.format(item.unitPrice)}</td><td>${text(discountLabel(item))}</td><td>${money.format(item.total ?? item.quantity * item.unitPrice)}</td></tr>`).join("")
-    : `<tr><td colspan="9" class="empty">Không có đơn hàng trong khoảng thời gian này.</td></tr>`;
+    ? report.transactions.map((item) => `<tr><td class="muted">${dateTime.format(new Date(item.createdAt))}</td><td class="product-name">${text(item.orderCode || "—")}</td><td><span class="channel-chip">${text(channelLabels[item.channel] || "Chưa xác định")}</span></td><td><span class="category-chip">${text(item.categoryName)}</span></td><td>${text(item.code)}</td><td>${text(variantLabel(item))}</td><td>${item.quantity}</td><td>${text(item.unit)}</td><td>${money.format(item.unitPrice)}</td><td>${text(discountLabel(item))}</td><td>${money.format(item.total ?? item.quantity * item.unitPrice)}</td></tr>`).join("")
+    : `<tr><td colspan="11" class="empty">Không có đơn hàng trong khoảng thời gian này.</td></tr>`;
 }
 
 function renderManagers() {
@@ -319,10 +350,55 @@ function renderManagers() {
     : `<tr><td colspan="6" class="empty">Chưa có tài khoản quản lý.</td></tr>`;
 }
 
+function renderCategories() {
+  $("#category-count").textContent = `${state.categories.length} danh mục`;
+  $("#category-list").innerHTML = state.categories.map((category) => (
+    `<span class="category-chip category-chip-large">${text(category.name)}${category.requiresSize ? "<small>Có size</small>" : ""}</span>`
+  )).join("");
+
+  const newProductSelect = $("#new-product-form").elements.categoryId;
+  const receiveSelect = $("#receive-form").elements.categoryId;
+  const selectedNewProductCategory = newProductSelect.value;
+  const selectedReceiveCategory = receiveSelect.value;
+  newProductSelect.innerHTML = categoryOptions(selectedNewProductCategory);
+  receiveSelect.innerHTML = categoryOptions(selectedReceiveCategory);
+  updateNewProductCategoryRules();
+  updateReceiveProductOptions();
+}
+
 function findProduct(code) {
   return state.products.find(
     (product) => product.code.toLowerCase() === String(code).trim().toLowerCase()
   );
+}
+
+function updateNewProductCategoryRules() {
+  const form = $("#new-product-form");
+  const category = categoryById(form.elements.categoryId.value);
+  const sizeField = $("#new-product-size-field");
+  const sizeInput = form.elements.size;
+  const requiresSize = Boolean(category?.requiresSize);
+  sizeField.classList.toggle("hidden", !requiresSize);
+  sizeInput.required = requiresSize;
+  if (!requiresSize) sizeInput.value = "";
+  $("#new-product-price-note").textContent = category ? `(${category.priceNote})` : "";
+}
+
+function updateReceiveProductOptions() {
+  const form = $("#receive-form");
+  const categoryId = Number(form.elements.categoryId.value);
+  const codeSelect = form.elements.code;
+  const previousCode = codeSelect.value;
+  const products = state.products.filter((product) => product.categoryId === categoryId);
+  codeSelect.disabled = !categoryId;
+  codeSelect.innerHTML = !categoryId
+    ? `<option value="">Chọn danh mục trước</option>`
+    : `<option value="">Chọn mã sản phẩm</option>${products.map((product) => (
+      `<option value="${text(product.code)}"${product.code === previousCode ? " selected" : ""}>${text(productOptionLabel(product))}</option>`
+    )).join("")}`;
+  const category = categoryById(categoryId);
+  $("#receive-price-note").textContent = category ? `(${category.priceNote})` : "";
+  fillProductFields(form);
 }
 
 function fillProductFields(form) {
@@ -331,6 +407,18 @@ function fillProductFields(form) {
   if (product && form.elements.salePrice && !form.elements.salePrice.value) {
     form.elements.salePrice.value = product.salePrice;
   }
+  const preview = $("#receive-product-preview");
+  if (!preview) return;
+  if (!product) {
+    preview.classList.add("hidden");
+    preview.innerHTML = "";
+    return;
+  }
+  const visual = product.image
+    ? `<img src="${product.image}" alt="" />`
+    : `<span class="product-placeholder">${text(product.name.slice(0, 1).toUpperCase())}</span>`;
+  preview.innerHTML = `<span class="selected-product-visual">${visual}</span><span><strong>${text(product.name)}</strong><small>${text(product.categoryName)} · ${text(variantLabel(product))} · tồn ${product.stock.toLocaleString("vi-VN")} ${text(product.unit)}</small></span>`;
+  preview.classList.remove("hidden");
 }
 
 function generateSaleOrderCode() {
@@ -346,12 +434,15 @@ function generateSaleOrderCode() {
 function saleItemTemplate() {
   return `<div class="sale-item-row" data-sale-item>
     <div class="sale-item-main">
+      <label>Danh mục <span class="required-star">*</span>
+        <select data-sale-field="categoryId">${categoryOptions()}</select>
+      </label>
       <label class="sale-product-code">Mã sản phẩm <span class="required-star">*</span>
-        <input data-sale-field="code" list="product-codes" placeholder="VD: PH003" autocomplete="off" />
+        <select data-sale-field="code" disabled><option value="">Chọn danh mục trước</option></select>
       </label>
       <div class="sale-product-preview" data-sale-preview>
         <span class="sale-preview-placeholder">?</span>
-        <span><strong>Chưa chọn sản phẩm</strong><small>Nhập mã để xem tên, ảnh và tồn kho</small></span>
+        <span><strong>Chưa chọn sản phẩm</strong><small>Chọn danh mục rồi chọn mã hàng</small></span>
       </div>
       <label>Số lượng <span class="required-star">*</span>
         <input data-sale-field="quantity" type="number" min="1" step="1" value="1" />
@@ -392,6 +483,19 @@ function saleOrderTemplate(orderCode = generateSaleOrderCode()) {
   </section>`;
 }
 
+function updateSaleProductOptions(item) {
+  const categoryId = Number(item.querySelector("[data-sale-field='categoryId']").value);
+  const codeSelect = item.querySelector("[data-sale-field='code']");
+  const previousCode = codeSelect.value;
+  const products = state.products.filter((product) => product.categoryId === categoryId);
+  codeSelect.innerHTML = !categoryId
+    ? `<option value="">Chọn danh mục trước</option>`
+    : `<option value="">Chọn mã sản phẩm</option>${products.map((product) => (
+      `<option value="${text(product.code)}"${product.code === previousCode ? " selected" : ""}>${text(productOptionLabel(product))}</option>`
+    )).join("")}`;
+  codeSelect.disabled = !categoryId || !$("#sale-form").elements.channel.value;
+}
+
 function updateSaleBuilderSummary() {
   const orders = [...document.querySelectorAll("[data-sale-order]")];
   const channelReady = Boolean($("#sale-form").elements.channel.value);
@@ -406,10 +510,17 @@ function updateSaleBuilderSummary() {
       !channelReady || orders.length === 1;
     const items = [...order.querySelectorAll("[data-sale-item]")];
     items.forEach((item) => {
+      const categoryReady = Boolean(item.querySelector("[data-sale-field='categoryId']").value);
+      const productReady = Boolean(item.querySelector("[data-sale-field='code']").value);
       item.querySelectorAll("input, select").forEach((field) => {
         const isDiscountValue = field.dataset.saleField === "discountValue";
+        const isProductCode = field.dataset.saleField === "code";
+        const isCategory = field.dataset.saleField === "categoryId";
         const discountType = item.querySelector("[data-sale-field='discountType']").value;
-        field.disabled = !channelReady || (isDiscountValue && !discountType);
+        field.disabled = !channelReady ||
+          (isProductCode && !categoryReady) ||
+          (!isCategory && !isProductCode && !productReady) ||
+          (isDiscountValue && !discountType);
       });
       item.querySelector("[data-sale-action='remove-item']").disabled =
         !channelReady || items.length === 1;
@@ -434,10 +545,10 @@ function updateSaleItem(item, prefillPrice = false) {
     const visual = product.image
       ? `<img src="${product.image}" alt="" />`
       : `<span class="sale-preview-placeholder">${text(product.name.slice(0, 1).toUpperCase())}</span>`;
-    preview.innerHTML = `${visual}<span><strong>${text(product.name)}</strong><small>${text(product.code)} · còn ${product.stock.toLocaleString("vi-VN")} sản phẩm</small></span>`;
+    preview.innerHTML = `${visual}<span><strong>${text(product.name)}</strong><small>${text(product.code)} · ${text(variantLabel(product))} · còn ${product.stock.toLocaleString("vi-VN")} ${text(product.unit)}</small></span>`;
     preview.classList.add("found");
   } else {
-    preview.innerHTML = `<span class="sale-preview-placeholder">?</span><span><strong>Chưa chọn sản phẩm</strong><small>Nhập mã để xem tên, ảnh và tồn kho</small></span>`;
+    preview.innerHTML = `<span class="sale-preview-placeholder">?</span><span><strong>Chưa chọn sản phẩm</strong><small>Chọn danh mục rồi chọn mã hàng</small></span>`;
     preview.classList.remove("found");
   }
 
@@ -491,6 +602,11 @@ function collectSalesPayload() {
 
     const seenProductCodes = new Set();
     const items = [...order.querySelectorAll("[data-sale-item]")].map((item, itemIndex) => {
+      const categoryId = Number(item.querySelector("[data-sale-field='categoryId']").value);
+      const category = categoryById(categoryId);
+      if (!category) {
+        throw new Error(`Vui lòng chọn danh mục ở dòng ${itemIndex + 1} của đơn ${orderCode}.`);
+      }
       const code = item.querySelector("[data-sale-field='code']").value.trim().toUpperCase();
       const product = findProduct(code);
       if (!product) {
@@ -498,6 +614,9 @@ function collectSalesPayload() {
       }
       if (seenProductCodes.has(product.code)) {
         throw new Error(`Sản phẩm ${product.code} bị lặp trong đơn ${orderCode}.`);
+      }
+      if (product.categoryId !== categoryId) {
+        throw new Error(`Sản phẩm ${product.code} không thuộc danh mục ${category.name}.`);
       }
       seenProductCodes.add(product.code);
 
@@ -523,7 +642,14 @@ function collectSalesPayload() {
         throw new Error(`Tiền giảm mỗi sản phẩm ${product.code} không được lớn hơn giá bán.`);
       }
       stockNeeded.set(product.code, (stockNeeded.get(product.code) || 0) + quantity);
-      return { code: product.code, quantity, salePrice, discountType, discountValue };
+      return {
+        categoryId,
+        code: product.code,
+        quantity,
+        salePrice,
+        discountType,
+        discountValue
+      };
     });
     return { orderCode, items };
   });
@@ -544,14 +670,21 @@ function formData(form) {
 }
 
 async function refreshCore() {
-  const requests = [api("/api/dashboard"), api("/api/products"), api("/api/transactions")];
+  const requests = [
+    api("/api/dashboard"),
+    api("/api/categories"),
+    api("/api/products"),
+    api("/api/transactions")
+  ];
   if (state.currentUser?.role === "admin") requests.push(api("/api/managers"));
-  const [dashboard, products, transactions, managers = []] = await Promise.all(requests);
+  const [dashboard, categories, products, transactions, managers = []] = await Promise.all(requests);
   state.dashboard = dashboard;
+  state.categories = categories;
   state.products = products;
   state.transactions = transactions;
   state.managers = managers;
   renderDashboard();
+  renderCategories();
   renderProductOptions();
   renderProducts();
   renderHistories();
@@ -754,6 +887,7 @@ $("#logout-button").addEventListener("click", async () => {
 });
 
 const newProductForm = $("#new-product-form");
+newProductForm.elements.categoryId.addEventListener("change", updateNewProductCategoryRules);
 newProductForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   const saved = await submitForm(
@@ -780,8 +914,21 @@ $("#product-image-input").addEventListener("change", async (event) => {
 });
 $("#remove-image").addEventListener("click", clearProductImage);
 
+const categoryForm = $("#category-form");
+categoryForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  await submitForm(
+    categoryForm,
+    "/api/categories",
+    "Đã thêm danh mục hàng hóa mới.",
+    "POST",
+    { requiresSize: categoryForm.elements.requiresSize.checked }
+  );
+});
+
 const receiveForm = $("#receive-form");
-receiveForm.elements.code.addEventListener("input", () => fillProductFields(receiveForm));
+receiveForm.elements.categoryId.addEventListener("change", updateReceiveProductOptions);
+receiveForm.elements.code.addEventListener("change", () => fillProductFields(receiveForm));
 receiveForm.addEventListener("submit", (event) => {
   event.preventDefault();
   submitForm(receiveForm, "/api/receipts", "Đã nhập thêm hàng và cập nhật tồn kho.");
@@ -819,7 +966,16 @@ saleForm.addEventListener("change", (event) => {
     return;
   }
   const item = event.target.closest("[data-sale-item]");
-  if (item) updateSaleItem(item, event.target.dataset.saleField === "code");
+  if (item) {
+    if (event.target.dataset.saleField === "categoryId") {
+      updateSaleProductOptions(item);
+      updateSaleItem(item);
+      updateSaleBuilderSummary();
+      return;
+    }
+    updateSaleItem(item, event.target.dataset.saleField === "code");
+    updateSaleBuilderSummary();
+  }
 });
 saleForm.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -861,7 +1017,11 @@ saleForm.addEventListener("submit", async (event) => {
 $("#product-search").addEventListener("input", (event) => {
   const term = event.target.value.trim().toLowerCase();
   renderProducts(
-    state.products.filter((product) => `${product.code} ${product.name}`.toLowerCase().includes(term))
+    state.products.filter((product) => (
+      `${product.code} ${product.name} ${product.categoryName} ${product.size || ""} ${product.color || ""}`
+        .toLowerCase()
+        .includes(term)
+    ))
   );
 });
 
@@ -941,6 +1101,52 @@ $("#manager-table").addEventListener("click", async (event) => {
     toast("Đã xóa tài khoản quản lý.");
   } catch (error) {
     toast(error.message, "error");
+  }
+});
+
+$("#admin-password-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const errorElement = $("#admin-password-error");
+  const currentPassword = form.elements.currentPassword.value;
+  const newPassword = form.elements.newPassword.value;
+  const confirmPassword = form.elements.confirmPassword.value;
+  errorElement.textContent = "";
+  errorElement.classList.add("hidden");
+
+  let message = "";
+  if (!currentPassword) {
+    message = "Vui lòng nhập mật khẩu hiện tại.";
+  } else if (newPassword.length < 8) {
+    message = "Mật khẩu mới phải có ít nhất 8 ký tự.";
+  } else if (newPassword !== confirmPassword) {
+    message = "Mật khẩu mới và phần xác nhận không trùng khớp.";
+  } else if (newPassword === currentPassword) {
+    message = "Mật khẩu mới phải khác mật khẩu hiện tại.";
+  }
+  if (message) {
+    errorElement.textContent = message;
+    errorElement.classList.remove("hidden");
+    return;
+  }
+
+  const button = form.querySelector("button[type='submit']");
+  button.disabled = true;
+  button.textContent = "Đang cập nhật...";
+  try {
+    await api("/api/admin/password", {
+      method: "PUT",
+      body: JSON.stringify(formData(form))
+    });
+    form.reset();
+    toast("Đã cập nhật mật khẩu admin. Các phiên đăng nhập khác đã được đăng xuất.");
+  } catch (error) {
+    errorElement.textContent = error.message;
+    errorElement.classList.remove("hidden");
+    toast(error.message, "error");
+  } finally {
+    button.disabled = false;
+    button.textContent = "Cập nhật mật khẩu admin";
   }
 });
 

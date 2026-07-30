@@ -4,7 +4,9 @@
 
 ## Chức năng
 
-- Thêm hàng hóa: mã sản phẩm, tên, số lượng, đơn giá nhập, giá bán và ảnh sản phẩm tùy chọn.
+- Có sẵn 6 danh mục hàng hóa: Giày, Vớ, Xịt khử mùi, Thùng Carton, Băng keo và Giấy in; có thể thêm danh mục mới ngay trên màn hình Nhập hàng.
+- Thêm hàng hóa theo danh mục với mã sản phẩm, size (bắt buộc cho Giày và Vớ), màu sắc tùy chọn, số lượng, đơn vị, giá nhập, giá bán tùy chọn và ảnh sản phẩm tùy chọn.
+- Đơn vị hàng hóa hỗ trợ: đôi, cái, chai, thùng, cuộn và tờ.
 - Nhập thêm hàng; giá nhập bình quân được cập nhật tự động.
 - Lịch sử nhập hàng hiển thị sản phẩm, số lượng, đơn giá, người thực hiện và thời gian cập nhật.
 - Xuất nhiều đơn hàng cùng lúc cho một kênh; mỗi mã đơn có thể chứa nhiều sản phẩm.
@@ -13,6 +15,7 @@
 - Một đợt xuất chỉ cập nhật khi toàn bộ đơn hợp lệ; nếu có một dòng sai hoặc không đủ tồn, kho không bị thay đổi.
 - Lịch sử xuất hàng hiển thị mã đơn, kênh bán, sản phẩm, giảm giá, thành tiền sau giảm, người thực hiện và thời gian xuất.
 - Khi chọn mã sản phẩm để xuất, giao diện hiển thị ngay tên, ảnh và số lượng tồn.
+- Luồng xuất hàng đi theo thứ tự kênh bán → danh mục hàng hóa → mã sản phẩm, đồng thời hiển thị size, màu sắc và đơn vị tương ứng của hàng đã nhập.
 - Tồn kho giảm ngay khi xuất; không thể xuất vượt quá số lượng hiện có.
 - Báo cáo theo ngày, tuần hoặc tháng:
   - doanh thu và lợi nhuận;
@@ -23,6 +26,7 @@
 - Biểu đồ tròn và biểu đồ cột ở Tổng quan thống kê kênh nhiều đơn nhất, sản phẩm bán nhiều nhất và sản phẩm tồn kho nhiều nhất.
 - Đăng nhập bằng số điện thoại và mật khẩu, có kiểm tra định dạng và nút hiện/ẩn mật khẩu.
 - Admin có thể thêm, sửa và xóa tối đa 5 tài khoản quản lý; tên, số điện thoại và mật khẩu là bắt buộc khi tạo mới.
+- Admin có thể tự đổi mật khẩu sau khi xác minh mật khẩu hiện tại; các phiên đăng nhập admin khác sẽ được đăng xuất.
 - Số điện thoại quản lý phải có đúng 10 số, bắt đầu bằng số 0; mật khẩu tối thiểu 6 ký tự và có ít nhất một ký tự đặc biệt.
 - Quản lý được nhập hàng, xuất hàng, xem tồn kho và báo cáo nhưng không được quản lý tài khoản.
 
@@ -51,6 +55,12 @@ Mở `http://localhost:3000`. Khi chạy thử không đặt `NODE_ENV=productio
 - Mật khẩu: `Admin@123`
 
 Không sử dụng tài khoản mặc định này cho môi trường thực tế.
+
+Kiểm tra nhanh toàn bộ luồng danh mục, nhập/xuất hàng và đổi mật khẩu:
+
+```bash
+npm test
+```
 
 ## Triển khai VPS bằng Docker
 

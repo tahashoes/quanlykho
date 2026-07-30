@@ -97,15 +97,51 @@
         </section>
 
         <section class="view" id="goods-view">
+          <article class="card category-manager-card">
+            <div class="card-heading">
+              <div><p class="eyebrow">Bước đầu tiên</p><h2>Danh mục hàng hóa</h2></div>
+              <span class="category-count" id="category-count">0 danh mục</span>
+            </div>
+            <p class="category-intro">Chọn danh mục có sẵn hoặc thêm danh mục mới trước khi nhập hàng hóa.</p>
+            <div class="category-manager-body">
+              <div class="category-list" id="category-list"></div>
+              <form id="category-form" class="category-form">
+                <label>Tên danh mục mới
+                  <input required name="name" maxlength="80" placeholder="VD: Túi đóng gói" />
+                </label>
+                <label class="check-field">
+                  <input name="requiresSize" type="checkbox" />
+                  <span>Danh mục này cần quản lý size</span>
+                </label>
+                <button class="button button-ghost" type="submit">+ Thêm danh mục</button>
+              </form>
+            </div>
+          </article>
           <div class="content-grid form-grid">
             <article class="card">
               <div class="card-heading"><div><p class="eyebrow">Sản phẩm mới</p><h2>Thêm hàng hóa</h2></div></div>
               <form id="new-product-form" class="form-grid-inner">
+                <label class="form-wide">Danh mục hàng hóa
+                  <select required name="categoryId"><option value="">Chọn danh mục</option></select>
+                </label>
                 <label>Mã sản phẩm<input required name="code" placeholder="VD: SP-001" maxlength="50" /></label>
-                <label>Tên sản phẩm<input required name="name" placeholder="VD: Giày cao gót" maxlength="160" /></label>
+                <label>Tên hàng hóa <span class="optional">(không bắt buộc)</span><input name="name" placeholder="VD: Giày cao gót" maxlength="160" /></label>
+                <label id="new-product-size-field" class="hidden">Size<input name="size" maxlength="50" placeholder="VD: 38" /></label>
+                <label>Màu sắc <span class="optional">(không bắt buộc)</span><input name="color" maxlength="80" placeholder="VD: Đen" /></label>
                 <label>Số lượng nhập<input required name="quantity" type="number" min="1" step="1" placeholder="0" /></label>
-                <label>Đơn giá nhập<input required name="costPrice" type="number" min="0" step="1000" placeholder="0" /></label>
-                <label>Giá bán<input required name="salePrice" type="number" min="0" step="1000" placeholder="0" /></label>
+                <label>Đơn vị
+                  <select required name="unit">
+                    <option value="">Chọn đơn vị</option>
+                    <option value="đôi">Đôi</option>
+                    <option value="cái">Cái</option>
+                    <option value="chai">Chai</option>
+                    <option value="thùng">Thùng</option>
+                    <option value="cuộn">Cuộn</option>
+                    <option value="tờ">Tờ</option>
+                  </select>
+                </label>
+                <label>Giá nhập <small class="price-note" id="new-product-price-note"></small><input required name="costPrice" type="number" min="0" step="1000" placeholder="0" /></label>
+                <label>Giá bán <span class="optional">(không bắt buộc)</span><input name="salePrice" type="number" min="0" step="1000" placeholder="Có thể cập nhật khi xuất hàng" /></label>
                 <label class="image-field">Hình ảnh sản phẩm <span class="optional">(không bắt buộc)</span><input id="product-image-input" name="imageFile" type="file" accept="image/jpeg,image/png,image/webp" /></label>
                 <div class="image-preview hidden" id="image-preview"><img alt="Ảnh sản phẩm xem trước" /><button type="button" class="text-button" id="remove-image">Xóa ảnh</button></div>
                 <button class="button button-primary" type="submit">Lưu hàng hóa</button>
@@ -114,10 +150,16 @@
             <article class="card">
               <div class="card-heading"><div><p class="eyebrow">Bổ sung tồn</p><h2>Nhập thêm hàng</h2></div></div>
               <form id="receive-form" class="form-grid-inner">
-                <label>Mã sản phẩm<input required name="code" list="product-codes" placeholder="Chọn hoặc nhập mã" /></label>
+                <label class="form-wide">Danh mục hàng hóa
+                  <select required name="categoryId"><option value="">Chọn danh mục</option></select>
+                </label>
+                <label>Mã sản phẩm
+                  <select required name="code" disabled><option value="">Chọn danh mục trước</option></select>
+                </label>
                 <label>Tên sản phẩm<input name="name" readonly placeholder="Tự hiển thị theo mã" /></label>
+                <div class="selected-product hidden" id="receive-product-preview"></div>
                 <label>Số lượng nhập<input required name="quantity" type="number" min="1" step="1" placeholder="0" /></label>
-                <label>Đơn giá nhập<input required name="costPrice" type="number" min="0" step="1000" placeholder="0" /></label>
+                <label>Giá nhập <small class="price-note" id="receive-price-note"></small><input required name="costPrice" type="number" min="0" step="1000" placeholder="0" /></label>
                 <label>Giá bán mới <span class="optional">(không bắt buộc)</span><input name="salePrice" type="number" min="0" step="1000" placeholder="Giữ nguyên giá hiện tại" /></label>
                 <button class="button button-primary" type="submit">Xác nhận nhập</button>
               </form>
@@ -125,7 +167,7 @@
           </div>
           <article class="card full-card history-card">
             <div class="card-heading"><div><p class="eyebrow">Nhật ký kho</p><h2>Lịch sử nhập hàng</h2></div></div>
-            <div class="table-wrap"><table><thead><tr><th>Thời gian cập nhật</th><th>Người nhập</th><th>Mã sản phẩm</th><th>Tên sản phẩm</th><th>Số lượng</th><th>Đơn giá nhập</th><th>Thành tiền</th></tr></thead><tbody id="receipt-history-table"></tbody></table></div>
+            <div class="table-wrap"><table><thead><tr><th>Thời gian cập nhật</th><th>Người nhập</th><th>Danh mục</th><th>Mã sản phẩm</th><th>Size / Màu</th><th>Số lượng</th><th>Đơn vị</th><th>Giá nhập</th><th>Thành tiền</th></tr></thead><tbody id="receipt-history-table"></tbody></table></div>
           </article>
         </section>
 
@@ -172,14 +214,14 @@
           </article>
           <article class="card full-card history-card">
             <div class="card-heading"><div><p class="eyebrow">Nhật ký bán hàng</p><h2>Lịch sử xuất hàng</h2></div></div>
-            <div class="table-wrap"><table><thead><tr><th>Thời gian xuất</th><th>Người xuất</th><th>Mã đơn</th><th>Kênh</th><th>Mã sản phẩm</th><th>Tên sản phẩm</th><th>Số lượng</th><th>Giá bán</th><th>Giảm giá</th><th>Thành tiền</th></tr></thead><tbody id="sale-history-table"></tbody></table></div>
+            <div class="table-wrap"><table><thead><tr><th>Thời gian xuất</th><th>Người xuất</th><th>Mã đơn</th><th>Kênh</th><th>Danh mục</th><th>Mã sản phẩm</th><th>Size / Màu</th><th>Số lượng</th><th>Đơn vị</th><th>Giá bán</th><th>Giảm giá</th><th>Thành tiền</th></tr></thead><tbody id="sale-history-table"></tbody></table></div>
           </article>
         </section>
 
         <section class="view" id="inventory-view">
           <article class="card full-card">
-            <div class="card-heading inventory-header"><div><p class="eyebrow">Danh mục sản phẩm</p><h2>Quản lý tồn kho</h2></div><label class="search"><span>Tìm kiếm</span><input id="product-search" placeholder="Mã hoặc tên sản phẩm" /></label></div>
-            <div class="table-wrap"><table><thead><tr><th>Sản phẩm</th><th>Mã</th><th>Tồn kho</th><th>Giá nhập TB</th><th>Giá bán</th><th>Giá trị tồn</th><th>Cập nhật</th></tr></thead><tbody id="product-table"></tbody></table></div>
+            <div class="card-heading inventory-header"><div><p class="eyebrow">Danh mục sản phẩm</p><h2>Quản lý tồn kho</h2></div><label class="search"><span>Tìm kiếm</span><input id="product-search" placeholder="Mã, danh mục, size hoặc màu" /></label></div>
+            <div class="table-wrap"><table><thead><tr><th>Sản phẩm</th><th>Danh mục</th><th>Mã</th><th>Size / Màu</th><th>Tồn kho</th><th>Đơn vị</th><th>Giá nhập TB</th><th>Giá bán</th><th>Giá trị tồn</th><th>Cập nhật</th></tr></thead><tbody id="product-table"></tbody></table></div>
           </article>
         </section>
 
@@ -206,7 +248,7 @@
           </article>
           <article class="card full-card report-detail">
             <div class="card-heading"><div><p class="eyebrow">Chi tiết kỳ báo cáo</p><h2>Các đơn hàng đã bán</h2></div></div>
-            <div class="table-wrap"><table><thead><tr><th>Thời gian</th><th>Mã đơn</th><th>Kênh</th><th>Mã sản phẩm</th><th>Tên sản phẩm</th><th>Số lượng</th><th>Đơn giá</th><th>Giảm giá</th><th>Thành tiền</th></tr></thead><tbody id="transaction-table"></tbody></table></div>
+            <div class="table-wrap"><table><thead><tr><th>Thời gian</th><th>Mã đơn</th><th>Kênh</th><th>Danh mục</th><th>Mã sản phẩm</th><th>Size / Màu</th><th>Số lượng</th><th>Đơn vị</th><th>Đơn giá</th><th>Giảm giá</th><th>Thành tiền</th></tr></thead><tbody id="transaction-table"></tbody></table></div>
           </article>
         </section>
 
@@ -227,7 +269,31 @@
                 <div class="form-actions"><button class="button button-primary" type="submit">Thêm quản lý</button><button class="button button-ghost hidden" type="button" id="cancel-manager-edit">Hủy sửa</button></div>
               </form>
             </article>
-            <article class="card manager-info"><p class="eyebrow">Quyền hạn</p><h2>Tối đa 5 quản lý</h2><p>Quản lý có thể nhập hàng, xuất hàng, xem tồn kho và báo cáo. Chỉ admin được thêm, sửa hoặc xóa tài khoản quản lý.</p></article>
+            <article class="card admin-password-card">
+              <div class="card-heading"><div><p class="eyebrow">Bảo mật admin</p><h2>Thay đổi mật khẩu</h2></div></div>
+              <form id="admin-password-form" class="manager-form" novalidate>
+                <label>Mật khẩu hiện tại
+                  <span class="password-field">
+                    <input id="admin-current-password" required name="currentPassword" type="password" autocomplete="current-password" minlength="8" />
+                    <button class="password-toggle" type="button" data-toggle-password="admin-current-password" aria-label="Hiện mật khẩu" title="Hiện mật khẩu">◉</button>
+                  </span>
+                </label>
+                <label>Mật khẩu mới <span class="optional">(tối thiểu 8 ký tự)</span>
+                  <span class="password-field">
+                    <input id="admin-new-password" required name="newPassword" type="password" autocomplete="new-password" minlength="8" />
+                    <button class="password-toggle" type="button" data-toggle-password="admin-new-password" aria-label="Hiện mật khẩu" title="Hiện mật khẩu">◉</button>
+                  </span>
+                </label>
+                <label>Xác nhận mật khẩu mới
+                  <span class="password-field">
+                    <input id="admin-confirm-password" required name="confirmPassword" type="password" autocomplete="new-password" minlength="8" />
+                    <button class="password-toggle" type="button" data-toggle-password="admin-confirm-password" aria-label="Hiện mật khẩu" title="Hiện mật khẩu">◉</button>
+                  </span>
+                </label>
+                <p class="form-error hidden" id="admin-password-error"></p>
+                <button class="button button-primary" type="submit">Cập nhật mật khẩu admin</button>
+              </form>
+            </article>
           </div>
           <article class="card full-card manager-table-card">
             <div class="card-heading"><div><p class="eyebrow">Danh sách tài khoản</p><h2>Quản lý đang hoạt động</h2></div></div>

@@ -17,6 +17,15 @@ const isProduction = process.env.NODE_ENV === "production";
 const cookieSecure = process.env.COOKIE_SECURE === "true";
 const sessionDays = 7;
 const salesChannels = ["facebook", "zalo", "tiktok", "shopee", "website", "lazada"];
+const productUnits = ["đôi", "cái", "chai", "thùng", "cuộn", "tờ"];
+const defaultCategories = [
+  { name: "Giày", requiresSize: true, priceNote: "Đã bao gồm VAT 8%" },
+  { name: "Vớ", requiresSize: true, priceNote: "Đã bao gồm VAT 8%" },
+  { name: "Xịt khử mùi", requiresSize: false, priceNote: "Đã bao gồm PVC" },
+  { name: "Thùng Carton", requiresSize: false, priceNote: "Đã bao gồm PVC" },
+  { name: "Băng keo", requiresSize: false, priceNote: "Đã bao gồm PVC" },
+  { name: "Giấy in", requiresSize: false, priceNote: "Đã bao gồm PVC" }
+];
 
 mkdirSync(dirname(dataFile), { recursive: true });
 const db = new DatabaseSync(dataFile);
@@ -78,8 +87,49 @@ ensureColumn("transactions", "discount_type", "TEXT");
 ensureColumn("transactions", "discount_value", "REAL NOT NULL DEFAULT 0");
 ensureColumn("users", "display_name", "TEXT");
 db.exec(`
+  CREATE TABLE IF NOT EXISTS categories (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    requires_size INTEGER NOT NULL DEFAULT 0 CHECK(requires_size IN (0, 1)),
+    price_note TEXT NOT NULL DEFAULT 'Đã bao gồm thuế/phí theo hóa đơn',
+    created_at TEXT NOT NULL
+  );
+`);
+ensureColumn("products", "category_id", "INTEGER");
+ensureColumn("products", "size", "TEXT");
+ensureColumn("products", "color", "TEXT");
+ensureColumn("products", "unit", "TEXT NOT NULL DEFAULT 'cái'");
+const insertDefaultCategory = db.prepare(`
+  INSERT OR IGNORE INTO categories (name, requires_size, price_note, created_at)
+  VALUES (?, ?, ?, ?)
+`);
+for (const category of defaultCategories) {
+  insertDefaultCategory.run(
+    category.name,
+    category.requiresSize ? 1 : 0,
+    category.priceNote,
+    now()
+  );
+}
+db.prepare(`
+  UPDATE products
+  SET category_id = (
+    SELECT id FROM categories
+    WHERE name = CASE
+      WHEN LOWER(products.name) LIKE '%vớ%' THEN 'Vớ'
+      WHEN LOWER(products.name) LIKE '%xịt%' THEN 'Xịt khử mùi'
+      WHEN LOWER(products.name) LIKE '%carton%' OR LOWER(products.name) LIKE '%thùng%' THEN 'Thùng Carton'
+      WHEN LOWER(products.name) LIKE '%băng keo%' OR LOWER(products.name) LIKE '%keo%' THEN 'Băng keo'
+      WHEN LOWER(products.name) LIKE '%giấy%' THEN 'Giấy in'
+      ELSE 'Giày'
+    END
+  )
+  WHERE category_id IS NULL
+`).run();
+db.exec(`
   DROP INDEX IF EXISTS idx_transactions_order_code;
   CREATE INDEX idx_transactions_order_code ON transactions(order_code);
+  CREATE INDEX IF NOT EXISTS idx_products_category_id ON products(category_id);
 `);
 db.prepare(`
   UPDATE users
@@ -139,6 +189,30 @@ function cleanName(value) {
     throw new AppError("Tên người quản lý không được vượt quá 120 ký tự.");
   }
   return name;
+}
+
+function cleanOptionalText(value, label, maximum = 120) {
+  const result = String(value ?? "").trim();
+  if (result.length > maximum) {
+    throw new AppError(`${label} không được vượt quá ${maximum} ký tự.`);
+  }
+  return result || null;
+}
+
+function cleanCategoryName(value) {
+  const name = cleanText(value, "Tên danh mục");
+  if (name.length > 80) {
+    throw new AppError("Tên danh mục không được vượt quá 80 ký tự.");
+  }
+  return name;
+}
+
+function cleanUnit(value) {
+  const unit = String(value ?? "").trim().toLowerCase();
+  if (!productUnits.includes(unit)) {
+    throw new AppError("Đơn vị hàng hóa không hợp lệ.");
+  }
+  return unit;
 }
 
 function cleanOrderCode(value) {
@@ -393,8 +467,57 @@ function logout(request, response) {
   });
 }
 
+function categoryView(category) {
+  return {
+    id: Number(category.id),
+    name: category.name,
+    requiresSize: Boolean(category.requires_size),
+    priceNote: category.price_note,
+    createdAt: category.created_at
+  };
+}
+
+function listCategories() {
+  return db.prepare(`
+    SELECT id, name, requires_size, price_note, created_at
+    FROM categories
+    ORDER BY id ASC
+  `).all().map(categoryView);
+}
+
+function addCategory(body) {
+  const name = cleanCategoryName(body.name);
+  const requiresSize = body.requiresSize === true || body.requiresSize === "true" ? 1 : 0;
+  const priceNote = requiresSize
+    ? "Đã bao gồm VAT 8%"
+    : "Đã bao gồm thuế/phí theo hóa đơn";
+  try {
+    const result = db.prepare(`
+      INSERT INTO categories (name, requires_size, price_note, created_at)
+      VALUES (?, ?, ?, ?)
+    `).run(name, requiresSize, priceNote, now());
+    return categoryView(db.prepare("SELECT * FROM categories WHERE id = ?").get(
+      Number(result.lastInsertRowid)
+    ));
+  } catch (error) {
+    if (String(error.message).includes("UNIQUE")) {
+      throw new AppError("Danh mục này đã tồn tại.");
+    }
+    throw error;
+  }
+}
+
+function getCategoryById(id) {
+  return db.prepare("SELECT * FROM categories WHERE id = ?").get(id);
+}
+
 function getProductByCode(code) {
-  return db.prepare("SELECT * FROM products WHERE code = ?").get(code);
+  return db.prepare(`
+    SELECT p.*, c.name AS category_name, c.requires_size, c.price_note
+    FROM products p
+    LEFT JOIN categories c ON c.id = p.category_id
+    WHERE p.code = ?
+  `).get(code);
 }
 
 function productView(product) {
@@ -406,6 +529,13 @@ function productView(product) {
     costPrice: Number(product.cost_price),
     salePrice: Number(product.sale_price),
     inventoryValue: Number(product.stock) * Number(product.cost_price),
+    categoryId: product.category_id ? Number(product.category_id) : null,
+    categoryName: product.category_name || "Chưa phân loại",
+    requiresSize: Boolean(product.requires_size),
+    priceNote: product.price_note || "",
+    size: product.size || null,
+    color: product.color || null,
+    unit: product.unit || "cái",
     image: product.image_data || null,
     updatedAt: product.updated_at
   };
@@ -435,8 +565,11 @@ function dashboard() {
   const recent = db.prepare(`
     SELECT t.id, t.kind, t.quantity, t.unit_price, t.unit_cost, t.sales_channel, t.order_code,
            t.operator_name, t.discount_type, t.discount_value,
-           t.created_at, p.code, p.name
-    FROM transactions t JOIN products p ON p.id = t.product_id
+           t.created_at, p.code, p.name, p.category_id, p.size, p.color, p.unit,
+           c.name AS category_name
+    FROM transactions t
+    JOIN products p ON p.id = t.product_id
+    LEFT JOIN categories c ON c.id = p.category_id
     ORDER BY t.id DESC LIMIT 8
   `).all();
   const channelRanking = db.prepare(`
@@ -525,35 +658,57 @@ function transactionView(row) {
     operatorName: row.operator_name || null,
     createdAt: row.created_at,
     code: row.code,
-    name: row.name
+    name: row.name,
+    categoryId: row.category_id ? Number(row.category_id) : null,
+    categoryName: row.category_name || "Chưa phân loại",
+    size: row.size || null,
+    color: row.color || null,
+    unit: row.unit || "cái"
   };
 }
 
 function listProducts(search = "") {
   const term = `%${String(search).trim()}%`;
   return db.prepare(`
-    SELECT * FROM products
-    WHERE code LIKE ? OR name LIKE ?
-    ORDER BY updated_at DESC, id DESC
-  `).all(term, term).map(productView);
+    SELECT p.*, c.name AS category_name, c.requires_size, c.price_note
+    FROM products p
+    LEFT JOIN categories c ON c.id = p.category_id
+    WHERE p.code LIKE ? OR p.name LIKE ? OR c.name LIKE ?
+       OR COALESCE(p.size, '') LIKE ? OR COALESCE(p.color, '') LIKE ?
+    ORDER BY p.updated_at DESC, p.id DESC
+  `).all(term, term, term, term, term).map(productView);
 }
 
 function listTransactions(limit = 500) {
   return db.prepare(`
     SELECT t.id, t.kind, t.quantity, t.unit_price, t.unit_cost, t.sales_channel, t.order_code,
            t.operator_name, t.discount_type, t.discount_value,
-           t.created_at, p.code, p.name
-    FROM transactions t JOIN products p ON p.id = t.product_id
+           t.created_at, p.code, p.name, p.category_id, p.size, p.color, p.unit,
+           c.name AS category_name
+    FROM transactions t
+    JOIN products p ON p.id = t.product_id
+    LEFT JOIN categories c ON c.id = p.category_id
     ORDER BY t.id DESC LIMIT ?
   `).all(limit).map(transactionView);
 }
 
 function addProduct(body, user) {
   const code = cleanText(body.code, "Mã sản phẩm").toUpperCase();
-  const name = cleanText(body.name, "Tên sản phẩm");
+  const categoryId = positiveInteger(body.categoryId, "Danh mục hàng hóa");
+  const category = getCategoryById(categoryId);
+  if (!category) throw new AppError("Không tìm thấy danh mục hàng hóa.", 404);
+  const name = cleanOptionalText(body.name, "Tên hàng hóa", 160) || code;
+  const size = cleanOptionalText(body.size, "Size", 50);
+  if (category.requires_size && !size) {
+    throw new AppError(`Danh mục ${category.name} bắt buộc phải nhập size.`);
+  }
+  const color = cleanOptionalText(body.color, "Màu sắc", 80);
+  const unit = cleanUnit(body.unit);
   const quantity = positiveInteger(body.quantity, "Số lượng");
-  const costPrice = nonNegativeNumber(body.costPrice, "Đơn giá nhập");
-  const salePrice = nonNegativeNumber(body.salePrice, "Giá bán");
+  const costPrice = nonNegativeNumber(body.costPrice, "Giá nhập");
+  const salePrice = body.salePrice === undefined || body.salePrice === ""
+    ? 0
+    : nonNegativeNumber(body.salePrice, "Giá bán");
   const image = cleanImage(body.image);
   const timestamp = now();
   db.exec("BEGIN IMMEDIATE");
@@ -563,9 +718,23 @@ function addProduct(body, user) {
     }
     const result = db.prepare(`
       INSERT INTO products
-        (code, name, stock, cost_price, sale_price, image_data, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(code, name, quantity, costPrice, salePrice, image, timestamp, timestamp);
+        (code, name, stock, cost_price, sale_price, image_data, category_id, size, color, unit,
+         created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      code,
+      name,
+      quantity,
+      costPrice,
+      salePrice,
+      image,
+      categoryId,
+      size,
+      color,
+      unit,
+      timestamp,
+      timestamp
+    );
     db.prepare(`
       INSERT INTO transactions
         (product_id, kind, quantity, unit_price, unit_cost, sales_channel, operator_name, created_at)
@@ -681,6 +850,12 @@ function sellStock(body, user) {
           product = getProductByCode(code);
           if (!product) throw new AppError(`Không tìm thấy sản phẩm ${code}.`, 404);
           productCache.set(code, product);
+        }
+        if (
+          rawItem?.categoryId !== undefined &&
+          Number(rawItem.categoryId) !== Number(product.category_id)
+        ) {
+          throw new AppError(`Sản phẩm ${code} không thuộc danh mục đã chọn.`);
         }
         const quantity = positiveInteger(rawItem?.quantity, `Số lượng của ${code}`);
         const salePrice = nonNegativeNumber(rawItem?.salePrice, `Giá bán của ${code}`);
@@ -849,8 +1024,11 @@ function salesReport(period, anchor) {
   const transactions = db.prepare(`
     SELECT t.id, t.kind, t.quantity, t.unit_price, t.unit_cost, t.sales_channel, t.order_code,
            t.operator_name, t.discount_type, t.discount_value,
-           t.created_at, p.code, p.name
-    FROM transactions t JOIN products p ON p.id = t.product_id
+           t.created_at, p.code, p.name, p.category_id, p.size, p.color, p.unit,
+           c.name AS category_name
+    FROM transactions t
+    JOIN products p ON p.id = t.product_id
+    LEFT JOIN categories c ON c.id = p.category_id
     WHERE t.kind = 'OUT' AND t.created_at >= ? AND t.created_at < ?
     ORDER BY t.id DESC LIMIT 500
   `).all(range.start, range.end).map(transactionView);
@@ -966,6 +1144,46 @@ function deleteManager(id) {
   return { ok: true };
 }
 
+function changeAdminPassword(body, user, request) {
+  const currentPassword = String(body.currentPassword ?? "");
+  const newPassword = cleanPassword(body.newPassword);
+  const confirmation = String(body.confirmPassword ?? "");
+  if (newPassword !== confirmation) {
+    throw new AppError("Mật khẩu mới và phần xác nhận không trùng khớp.");
+  }
+  const admin = db.prepare("SELECT * FROM users WHERE id = ? AND role = 'admin'").get(user.id);
+  if (!admin || !verifyPassword(currentPassword, admin.password_salt, admin.password_hash)) {
+    throw new AppError("Mật khẩu hiện tại không đúng.");
+  }
+  if (verifyPassword(newPassword, admin.password_salt, admin.password_hash)) {
+    throw new AppError("Mật khẩu mới phải khác mật khẩu hiện tại.");
+  }
+  const passwordData = hashPassword(newPassword);
+  const timestamp = now();
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    db.prepare(`
+      UPDATE users
+      SET password_hash = ?, password_salt = ?, updated_at = ?
+      WHERE id = ? AND role = 'admin'
+    `).run(passwordData.hash, passwordData.salt, timestamp, user.id);
+    const currentToken = parseCookies(request).inventory_session;
+    if (currentToken) {
+      db.prepare("DELETE FROM sessions WHERE user_id = ? AND token_hash <> ?").run(
+        user.id,
+        sessionHash(currentToken)
+      );
+    } else {
+      db.prepare("DELETE FROM sessions WHERE user_id = ?").run(user.id);
+    }
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+  return { ok: true, updatedAt: timestamp };
+}
+
 function routeId(pathname, prefix) {
   const match = new RegExp(`^${prefix}/(\\d+)$`).exec(pathname);
   return match ? Number(match[1]) : null;
@@ -1007,6 +1225,12 @@ const server = createServer(async (request, response) => {
     if (request.method === "GET" && url.pathname === "/api/dashboard") {
       return json(response, 200, dashboard());
     }
+    if (url.pathname === "/api/categories") {
+      if (request.method === "GET") return json(response, 200, listCategories());
+      if (request.method === "POST") {
+        return json(response, 201, addCategory(await readJson(request)));
+      }
+    }
     if (request.method === "GET" && url.pathname === "/api/products") {
       return json(response, 200, listProducts(url.searchParams.get("q") || ""));
     }
@@ -1028,6 +1252,14 @@ const server = createServer(async (request, response) => {
     }
     if (request.method === "POST" && url.pathname === "/api/sales") {
       return json(response, 201, sellStock(await readJson(request), user));
+    }
+    if (request.method === "PUT" && url.pathname === "/api/admin/password") {
+      requireAdmin(user);
+      return json(
+        response,
+        200,
+        changeAdminPassword(await readJson(request), user, request)
+      );
     }
     if (url.pathname === "/api/managers") {
       requireAdmin(user);

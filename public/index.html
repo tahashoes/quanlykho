@@ -49,6 +49,7 @@
           <button class="nav-link active" data-view="dashboard">Tổng quan</button>
           <button class="nav-link" data-view="goods">Nhập hàng</button>
           <button class="nav-link" data-view="sales">Xuất hàng</button>
+          <button class="nav-link" data-view="orders">Đơn hàng</button>
           <button class="nav-link" data-view="inventory">Tồn kho</button>
           <button class="nav-link" data-view="reports">Báo cáo</button>
           <button class="nav-link admin-only hidden" data-view="managers">Tài khoản quản lý</button>
@@ -135,7 +136,7 @@
           <article class="card sales-note sales-note-compact">
             <div class="sales-note-copy">
               <p class="eyebrow">Tự động cập nhật</p><h2>Tồn kho luôn chính xác</h2>
-              <p>Thao tác theo thứ tự Kênh bán hàng → Danh mục → Mã sản phẩm. Đơn Giày tự thêm Vớ, Xịt khử mùi, Thùng Carton, Băng keo và 1 tờ giấy in.</p>
+              <p>Facebook/Zalo/Website tự tạo mã và yêu cầu thông tin giao hàng; TikTok/Shopee/Lazada nhập mã đơn từ sàn. Đơn Giày tự thêm đầy đủ sản phẩm đi kèm.</p>
             </div>
             <div class="channel-cloud"><span>Facebook</span><span>Zalo</span><span>TikTok</span><span>Shopee</span><span>Website</span><span>Lazada</span></div>
           </article>
@@ -173,9 +174,16 @@
             </form>
           </article>
           <article class="card full-card history-card order-history-shell">
-            <div class="card-heading order-history-heading"><div><p class="eyebrow">Trạng thái đơn hàng</p><h2>Lịch sử xuất hàng</h2></div><span class="history-help">Mỗi đơn chỉ hiển thị một lần</span></div>
+            <div class="card-heading order-history-heading"><div><p class="eyebrow">Nhật ký kho</p><h2>Lịch sử xuất hàng</h2></div><span class="history-help">Chỉ ghi nhận thông tin xuất kho, không thao tác trạng thái tại đây</span></div>
+            <div class="table-wrap"><table><thead><tr><th>Thời gian</th><th>Người xuất</th><th>Mã đơn</th><th>Kênh</th><th>Loại hàng</th><th>Sản phẩm</th><th>Mã SP</th><th>Số lượng</th><th>Đơn vị</th></tr></thead><tbody id="sale-history-table"></tbody></table></div>
+          </article>
+        </section>
+
+        <section class="view" id="orders-view">
+          <article class="card full-card history-card order-history-shell">
+            <div class="card-heading order-history-heading"><div><p class="eyebrow">Quản lý trạng thái</p><h2>Tất cả đơn hàng</h2></div><span class="history-help">Theo dõi và chuyển trạng thái đơn tại đây</span></div>
             <div class="order-status-tabs" id="order-status-tabs"></div>
-            <div class="order-history-list" id="sale-order-history"></div>
+            <div class="order-history-list" id="order-list"></div>
           </article>
         </section>
 
@@ -205,11 +213,11 @@
           </div>
           <article class="card full-card channel-report">
             <div class="card-heading"><div><p class="eyebrow">Hiệu quả kênh bán</p><h2>Thống kê theo từng kênh</h2></div></div>
-            <div class="table-wrap"><table><thead><tr><th>Kênh bán</th><th>Số đơn</th><th>SP chính</th><th>Doanh thu</th><th>Phí sàn</th><th>Giá vốn</th><th>Lợi nhuận</th></tr></thead><tbody id="channel-table"></tbody></table></div>
+            <div class="table-wrap"><table><thead><tr><th>Kênh bán</th><th>Số đơn</th><th>SP chính</th><th>Doanh thu</th><th>Phí bán hàng</th><th>Giá vốn</th><th>Lợi nhuận</th></tr></thead><tbody id="channel-table"></tbody></table></div>
           </article>
           <article class="card full-card report-detail">
             <div class="card-heading"><div><p class="eyebrow">Chi tiết kỳ báo cáo</p><h2>Các đơn hàng đã bán</h2></div></div>
-            <div class="table-wrap"><table><thead><tr><th>Thời gian</th><th>Mã đơn</th><th>Kênh</th><th>Trạng thái</th><th>Sản phẩm chính</th><th>Doanh thu</th><th>Phí sàn</th><th>Giá vốn</th><th>Lợi nhuận</th></tr></thead><tbody id="transaction-table"></tbody></table></div>
+            <div class="table-wrap"><table><thead><tr><th>Thời gian</th><th>Mã đơn</th><th>Kênh</th><th>Trạng thái</th><th>Sản phẩm chính</th><th>Doanh thu</th><th>Phí bán hàng</th><th>Giá vốn</th><th>Lợi nhuận</th></tr></thead><tbody id="transaction-table"></tbody></table></div>
           </article>
         </section>
 

@@ -17,6 +17,7 @@ const viewTitles = {
   dashboard: "Tổng quan kho hàng",
   goods: "Nhập hàng",
   sales: "Xuất hàng",
+  orders: "Quản lý đơn hàng",
   inventory: "Quản lý tồn kho",
   reports: "Báo cáo thống kê",
   managers: "Tài khoản quản lý"
@@ -31,13 +32,15 @@ const channelLabels = {
   unknown: "Chưa xác định"
 };
 const orderStatusLabels = {
-  pending_pickup: "Đang chờ lấy",
+  pending_pickup: "Đang chờ lấy hàng",
   shipping: "Đang vận chuyển",
   delivered: "Đã giao",
   completed: "Hoàn thành",
-  returned: "Trả hàng",
-  cancelled: "Hủy đơn"
+  cancelled: "Đã Hủy",
+  returned: "Trả Hàng"
 };
+const directSalesChannels = new Set(["facebook", "zalo", "website"]);
+const marketplaceSalesChannels = new Set(["tiktok", "shopee", "lazada"]);
 const lockedOrderStatuses = new Set(["completed", "returned", "cancelled"]);
 const reversedOrderStatuses = new Set(["returned", "cancelled"]);
 const productUnitLabels = {
@@ -72,10 +75,9 @@ const state = {
   reportAnchor: localDateValue(),
   productImage: null,
   editingManagerId: null,
-  editingStockProductId: null,
+  editingInventoryProductId: null,
   orderStatusFilter: "pending_pickup"
 };
-let saleOrderSequence = 1;
 
 async function api(url, options = {}) {
   const response = await fetch(url, {
@@ -280,9 +282,10 @@ function showApp(user) {
 function renderDashboard() {
   const report = state.dashboard;
   if (!report) return;
+  const sellingFees = report.sellingFees ?? report.platformFees ?? 0;
   $("#dashboard-metrics").innerHTML = [
     metric("Doanh thu", money.format(report.revenue), "Chỉ tính sản phẩm chính", true),
-    metric("Lợi nhuận", money.format(report.profit), `Đã trừ ${money.format(report.platformFees)} phí sàn`),
+    metric("Lợi nhuận", money.format(report.profit), `Đã trừ ${money.format(sellingFees)} phí bán hàng`),
     metric("Giá trị tồn kho", money.format(report.inventoryValue), `${report.totalUnits} đơn vị trong kho`),
     metric("Sản phẩm", report.skuCount.toLocaleString("vi-VN"), `${report.lowStockCount} sản phẩm sắp hết`)
   ].join("");
@@ -356,17 +359,30 @@ function renderProducts(products = state.products) {
       const visual = product.image
         ? `<img class="product-thumb" src="${product.image}" alt="" />`
         : `<span class="product-placeholder">${text(product.name.slice(0, 1).toUpperCase())}</span>`;
-      const editingStock = state.editingStockProductId === product.id;
-      const stockCell = editingStock
-        ? `<span class="stock-edit"><input data-stock-value type="number" min="0" step="1" value="${product.stock}" /><button class="mini-button primary" data-stock-action="save" data-id="${product.id}">Lưu</button><button class="mini-button" data-stock-action="cancel">Hủy</button></span>`
+      const editingInventory = state.editingInventoryProductId === product.id;
+      const stockCell = editingInventory
+        ? `<input class="inventory-edit-input" data-inventory-value="stock" aria-label="Tồn kho" type="number" min="0" step="1" value="${product.stock}" />`
         : `<span class="stock${product.stock <= 5 ? " low" : ""}">${product.stock.toLocaleString("vi-VN")}</span>`;
-      return `<tr><td><div class="product-cell">${visual}<span class="product-name">${text(product.name)}</span></div></td><td><span class="category-chip">${text(product.categoryName)}</span></td><td class="product-code">${text(product.code)}</td><td>${variantHtml(product)}</td><td>${stockCell}</td><td>${text(product.unit)}</td><td>${money.format(product.costPrice)}</td><td>${money.format(product.shippingCost)}</td><td class="product-name">${money.format(product.landedCost)}</td><td>${product.salePrice ? money.format(product.salePrice) : "—"}</td><td>${money.format(product.inventoryValue)}</td><td><button class="mini-button" data-stock-action="edit" data-id="${product.id}">Sửa tồn</button></td></tr>`;
+      const shippingCell = editingInventory
+        ? `<input class="inventory-edit-input money" data-inventory-value="shippingCost" aria-label="Phí vận chuyển" inputmode="numeric" data-money-input value="${formatMoneyInputValue(Math.round(product.shippingCost))}" />`
+        : money.format(product.shippingCost);
+      const landedCostCell = editingInventory
+        ? `<input class="inventory-edit-input money" data-inventory-value="landedCost" aria-label="Giá vốn" inputmode="numeric" data-money-input value="${formatMoneyInputValue(Math.round(product.landedCost))}" />`
+        : money.format(product.landedCost);
+      const salePriceCell = editingInventory
+        ? `<input class="inventory-edit-input money" data-inventory-value="salePrice" aria-label="Giá bán" inputmode="numeric" data-money-input value="${formatMoneyInputValue(Math.round(product.salePrice))}" />`
+        : product.salePrice ? money.format(product.salePrice) : "—";
+      const actions = editingInventory
+        ? `<div class="inventory-edit-actions"><button class="mini-button primary" data-stock-action="save" data-id="${product.id}">Lưu</button><button class="mini-button" data-stock-action="cancel">Hủy</button></div>`
+        : `<button class="mini-button" data-stock-action="edit" data-id="${product.id}">Sửa</button>`;
+      return `<tr${editingInventory ? ' class="inventory-row-editing"' : ""}><td><div class="product-cell">${visual}<span class="product-name">${text(product.name)}</span></div></td><td><span class="category-chip">${text(product.categoryName)}</span></td><td class="product-code">${text(product.code)}</td><td>${variantHtml(product)}</td><td>${stockCell}</td><td>${text(product.unit)}</td><td>${money.format(product.costPrice)}</td><td>${shippingCell}</td><td class="product-name">${landedCostCell}</td><td>${salePriceCell}</td><td>${money.format(product.inventoryValue)}</td><td>${actions}</td></tr>`;
     }).join("")
     : `<tr><td colspan="12" class="empty">Chưa tìm thấy sản phẩm.</td></tr>`;
 }
 
 function renderHistories() {
   const receiptRows = state.transactions.filter((item) => item.kind === "IN");
+  const saleRows = state.transactions.filter((item) => item.kind === "OUT");
 
   $("#receipt-history-table").innerHTML = receiptRows.length
     ? receiptRows.map((item) => {
@@ -374,10 +390,13 @@ function renderHistories() {
       return `<tr><td class="muted">${dateTime.format(new Date(item.createdAt))}</td><td><span class="operator-name">${text(item.operatorName || "Dữ liệu cũ")}</span></td><td><span class="category-chip">${text(item.categoryName)}</span></td><td class="product-code">${text(item.code)}</td><td>${variantHtml(item)}</td><td>${item.quantity.toLocaleString("vi-VN")}</td><td>${text(item.unit)}</td><td>${money.format(item.unitPrice)}</td><td>${money.format(shipping)}</td><td>${money.format(item.quantity * item.unitCost)}</td></tr>`;
     }).join("")
     : `<tr><td colspan="10" class="empty">Chưa có lịch sử nhập hàng.</td></tr>`;
-  renderOrderHistory();
+  $("#sale-history-table").innerHTML = saleRows.length
+    ? saleRows.map((item) => `<tr><td class="muted">${dateTime.format(new Date(item.createdAt))}</td><td><span class="operator-name">${text(item.operatorName || "Dữ liệu cũ")}</span></td><td class="product-name">${text(item.orderCode || "—")}</td><td><span class="channel-chip">${text(channelLabels[item.channel] || "Chưa xác định")}</span></td><td>${item.lineRole === "addon" ? '<span class="history-line-role addon">Đi kèm</span>' : '<span class="history-line-role">Chính</span>'}</td><td>${text(item.name)}</td><td class="product-code">${text(item.code)}</td><td>${item.quantity.toLocaleString("vi-VN")}</td><td>${text(item.unit)}</td></tr>`).join("")
+    : `<tr><td colspan="9" class="empty">Chưa có lịch sử xuất hàng.</td></tr>`;
+  renderOrders();
 }
 
-function renderOrderHistory() {
+function renderOrders() {
   const statuses = Object.keys(orderStatusLabels);
   $("#order-status-tabs").innerHTML = statuses.map((status) => {
     const count = state.orders.filter((order) => order.status === status).length;
@@ -385,7 +404,7 @@ function renderOrderHistory() {
   }).join("");
 
   const orders = state.orders.filter((order) => order.status === state.orderStatusFilter);
-  $("#sale-order-history").innerHTML = orders.length
+  $("#order-list").innerHTML = orders.length
     ? orders.map((order) => {
       const mainProducts = order.items.map((item) => (
         `<div class="order-main-product"><span><strong>${text(item.name)}</strong><small>${text(item.code)} · ${variantHtml(item)}</small></span><span class="order-product-quantity">${item.quantity.toLocaleString("vi-VN")} ${text(item.unit)}</span><strong>${money.format(item.unitPrice)}</strong></div>`
@@ -396,15 +415,25 @@ function renderOrderHistory() {
         )).join("")}</div></div>`
         : "";
       const locked = lockedOrderStatuses.has(order.status);
+      const directChannel = directSalesChannels.has(order.channel);
+      const customerDetails = directChannel
+        ? `<div class="order-customer-box"><span><small>KHÁCH HÀNG</small><strong>${text(order.customerName || "—")}</strong></span><span><small>SỐ ĐIỆN THOẠI</small><strong>${text(order.customerPhone || "—")}</strong></span><span class="address"><small>ĐỊA CHỈ</small><strong>${text(order.customerAddress || "—")}</strong></span></div>`
+        : "";
+      const feeLabel = directChannel ? "PHÍ VẬN CHUYỂN" : "PHÍ SÀN";
+      const feeAmount = directChannel ? order.shippingFee : order.platformFee;
+      const feeDetail = directChannel
+        ? "Đơn bán trực tiếp"
+        : `${Number(order.platformFeePercent).toLocaleString("vi-VN", { maximumFractionDigits: 2 })}% doanh thu`;
       const statusActions = Object.entries(orderStatusLabels).map(([status, label]) => {
         const active = order.status === status;
         return `<button class="order-status-action status-${status}${active ? " active" : ""}${reversedOrderStatuses.has(status) ? " danger" : ""}" data-order-status-action="${status}" data-id="${order.id}" aria-pressed="${active}"${active ? " aria-current=\"step\"" : ""}${locked || active ? " disabled" : ""}>${active ? '<span class="order-status-check" aria-hidden="true">✓</span>' : ""}<span>${text(label)}</span></button>`;
       }).join("");
       return `<article class="order-history-card">
         <header class="order-history-card-header"><div><strong>${text(order.orderCode)}</strong><small>${dateTime.format(new Date(order.createdAt))} · ${text(order.operatorName || "Dữ liệu cũ")}</small></div><div><span class="channel-chip">${text(channelLabels[order.channel] || "Chưa xác định")}</span><span class="order-status-badge status-${order.status}">${text(orderStatusLabels[order.status])}</span></div></header>
+        ${customerDetails}
         <div class="order-main-products"><span class="order-section-label">Sản phẩm chính</span>${mainProducts}</div>
         ${addons}
-        <div class="order-finance-tabs"><span><small>DOANH THU</small><strong>${money.format(order.revenue)}</strong></span><span><small>PHÍ SÀN</small><strong>${money.format(order.platformFee)}</strong><em>${Number(order.platformFeePercent).toLocaleString("vi-VN", { maximumFractionDigits: 2 })}%</em></span><span><small>GIÁ VỐN</small><strong>${money.format(order.cogs)}</strong></span><span class="profit"><small>LỢI NHUẬN</small><strong>${money.format(order.profit)}</strong></span></div>
+        <div class="order-finance-tabs"><span><small>DOANH THU</small><strong>${money.format(order.revenue)}</strong></span><span><small>${feeLabel}</small><strong>${money.format(feeAmount)}</strong><em>${feeDetail}</em></span><span><small>GIÁ VỐN</small><strong>${money.format(order.cogs)}</strong></span><span class="profit"><small>LỢI NHUẬN</small><strong>${money.format(order.profit)}</strong></span></div>
         <div class="order-status-actions${locked ? " locked" : ""}"><span>${locked ? "Đơn đã kết thúc" : "Chuyển trạng thái đơn"}</span><div>${statusActions}</div></div>
       </article>`;
     }).join("")
@@ -419,9 +448,9 @@ function renderReport() {
     : `Từ ${shortDate.format(new Date(`${report.range.startDate}T00:00:00`))} đến ${shortDate.format(new Date(`${report.range.endDate}T00:00:00`))}`;
   $("#report-metrics").innerHTML = [
     metric("Doanh thu", money.format(report.totals.revenue), "Tổng sản phẩm chính", true),
-    metric("Phí sàn", money.format(report.totals.platformFees), `${report.totals.orders.toLocaleString("vi-VN")} đơn hàng`),
+    metric("Phí bán hàng", money.format(report.totals.sellingFees ?? report.totals.platformFees), `${report.totals.orders.toLocaleString("vi-VN")} đơn hàng`),
     metric("Giá vốn", money.format(report.totals.cogs), `${report.totals.units.toLocaleString("vi-VN")} sản phẩm chính`),
-    metric("Lợi nhuận", money.format(report.totals.profit), "Doanh thu − phí sàn − giá vốn")
+    metric("Lợi nhuận", money.format(report.totals.profit), "Doanh thu − phí bán hàng − giá vốn")
   ].join("");
   const channelRanking = report.channels.filter((item) => item.channel !== "unknown").sort(
     (left, right) => right.orders - left.orders || right.units - left.units
@@ -442,12 +471,12 @@ function renderReport() {
     emptyMessage: "Chưa có sản phẩm bán ra trong khoảng thời gian này.",
     ariaLabel: "Biểu đồ cột sản phẩm bán nhiều nhất trong kỳ báo cáo"
   });
-  const channelRows = report.channels.map((item) => `<tr><td><span class="channel-chip">${text(channelLabels[item.channel] || item.channel)}</span></td><td>${item.orders.toLocaleString("vi-VN")}</td><td>${item.units.toLocaleString("vi-VN")}</td><td>${money.format(item.revenue)}</td><td>${money.format(item.platformFees)}</td><td>${money.format(item.cogs)}</td><td>${money.format(item.profit)}</td></tr>`).join("");
-  $("#channel-table").innerHTML = `${channelRows}<tr class="channel-total"><td>TỔNG TẤT CẢ KÊNH</td><td>${report.totals.orders.toLocaleString("vi-VN")}</td><td>${report.totals.units.toLocaleString("vi-VN")}</td><td>${money.format(report.totals.revenue)}</td><td>${money.format(report.totals.platformFees)}</td><td>${money.format(report.totals.cogs)}</td><td>${money.format(report.totals.profit)}</td></tr>`;
+  const channelRows = report.channels.map((item) => `<tr><td><span class="channel-chip">${text(channelLabels[item.channel] || item.channel)}</span></td><td>${item.orders.toLocaleString("vi-VN")}</td><td>${item.units.toLocaleString("vi-VN")}</td><td>${money.format(item.revenue)}</td><td>${money.format(item.sellingFees ?? item.platformFees)}</td><td>${money.format(item.cogs)}</td><td>${money.format(item.profit)}</td></tr>`).join("");
+  $("#channel-table").innerHTML = `${channelRows}<tr class="channel-total"><td>TỔNG TẤT CẢ KÊNH</td><td>${report.totals.orders.toLocaleString("vi-VN")}</td><td>${report.totals.units.toLocaleString("vi-VN")}</td><td>${money.format(report.totals.revenue)}</td><td>${money.format(report.totals.sellingFees ?? report.totals.platformFees)}</td><td>${money.format(report.totals.cogs)}</td><td>${money.format(report.totals.profit)}</td></tr>`;
   $("#transaction-table").innerHTML = report.orders.length
     ? report.orders.map((order) => {
       const products = order.items.map((item) => `${item.name} × ${item.quantity}`).join(", ");
-      return `<tr><td class="muted">${dateTime.format(new Date(order.createdAt))}</td><td class="product-name">${text(order.orderCode)}</td><td><span class="channel-chip">${text(channelLabels[order.channel] || "Chưa xác định")}</span></td><td><span class="order-status-badge status-${order.status}">${text(orderStatusLabels[order.status])}</span></td><td title="${text(products)}">${text(products)}</td><td>${money.format(order.revenue)}</td><td>${money.format(order.platformFee)}</td><td>${money.format(order.cogs)}</td><td>${money.format(order.profit)}</td></tr>`;
+      return `<tr><td class="muted">${dateTime.format(new Date(order.createdAt))}</td><td class="product-name">${text(order.orderCode)}</td><td><span class="channel-chip">${text(channelLabels[order.channel] || "Chưa xác định")}</span></td><td><span class="order-status-badge status-${order.status}">${text(orderStatusLabels[order.status])}</span></td><td title="${text(products)}">${text(products)}</td><td>${money.format(order.revenue)}</td><td>${money.format(order.sellingFee ?? order.platformFee)}</td><td>${money.format(order.cogs)}</td><td>${money.format(order.profit)}</td></tr>`;
     }).join("")
     : `<tr><td colspan="9" class="empty">Không có đơn hàng trong khoảng thời gian này.</td></tr>`;
 }
@@ -507,16 +536,15 @@ function updateNewProductCategoryRules() {
   $("#new-product-price-note").textContent = category ? `(${category.priceNote})` : "";
 }
 
-function generateSaleOrderCode() {
+function generateSaleOrderCode(offset = 0) {
   const now = new Date();
   const date = state.nextOrderCode?.date || [
     String(now.getDate()).padStart(2, "0"),
     String(now.getMonth() + 1).padStart(2, "0"),
     now.getFullYear()
   ].join("");
-  const code = `TAHA-${date}-${String(saleOrderSequence).padStart(3, "0")}`;
-  saleOrderSequence += 1;
-  return code;
+  const sequence = Number(state.nextOrderCode?.sequence || 1) + offset;
+  return `TAHA-${date}-${String(sequence).padStart(3, "0")}`;
 }
 
 function saleItemTemplate() {
@@ -539,19 +567,24 @@ function saleItemTemplate() {
   </div>`;
 }
 
-function saleOrderTemplate(orderCode = generateSaleOrderCode()) {
+function saleOrderTemplate(orderCode = "") {
   return `<section class="sale-order-card" data-sale-order>
     <div class="sale-order-header">
       <div class="sale-order-title"><span class="sale-order-number" data-sale-order-number>Đơn hàng</span><small>Nhiều sản phẩm chính trong cùng một mã đơn</small></div>
-      <label class="sale-order-code">Mã đơn hàng <span class="required-star">*</span><span class="input-with-action"><input class="uppercase-input" data-sale-field="orderCode" value="${text(orderCode)}" maxlength="64" /><button type="button" class="inline-button" data-sale-action="generate-order">Tạo mã</button></span></label>
+      <label class="sale-order-code">Mã đơn hàng <span class="required-star">*</span><input class="uppercase-input" data-sale-field="orderCode" value="${text(orderCode)}" maxlength="64" placeholder="Nhập mã đơn từ sàn" /><small data-sale-code-help>Chọn kênh bán hàng trước</small></label>
       <button class="sale-remove-order" type="button" data-sale-action="remove-order">Xóa đơn</button>
+    </div>
+    <div class="sale-customer-fields hidden" data-sale-customer-fields>
+      <label><span class="sale-field-title">Tên khách hàng <b>*</b></span><input data-sale-field="customerName" maxlength="120" placeholder="Nhập tên khách hàng" /></label>
+      <label><span class="sale-field-title">Số điện thoại <b>*</b></span><input data-sale-field="customerPhone" inputmode="numeric" maxlength="10" placeholder="VD: 0912345678" /></label>
+      <label class="customer-address"><span class="sale-field-title">Địa chỉ <b>*</b></span><textarea data-sale-field="customerAddress" maxlength="300" rows="2" placeholder="Nhập địa chỉ giao hàng đầy đủ"></textarea></label>
     </div>
     <div class="sale-order-items">${saleItemTemplate()}</div>
     <button class="sale-add-item" type="button" data-sale-action="add-item">+ Thêm sản phẩm</button>
     <div class="sale-order-summary">
       <div class="sale-draft-finances">
         <span><small>DOANH THU</small><strong data-draft-revenue>${money.format(0)}</strong></span>
-        <label class="sale-finance-fee"><small>PHÍ SÀN · <b data-sale-fee-channel>KÊNH ĐÃ CHỌN</b></small><input aria-label="Phí sàn" data-sale-field="platformFee" inputmode="numeric" data-money-input value="0" /><em data-sale-fee-percent>0% doanh thu</em></label>
+        <label class="sale-finance-fee"><small><span data-sale-fee-label>PHÍ BÁN HÀNG</span> · <b data-sale-fee-channel>KÊNH ĐÃ CHỌN</b></small><input aria-label="Phí bán hàng" data-sale-field="channelFee" inputmode="numeric" data-money-input value="0" /><em data-sale-fee-percent>Chọn kênh bán</em></label>
         <span class="sale-finance-cogs"><small>GIÁ VỐN</small><strong data-draft-cogs>${money.format(0)}</strong><em class="sale-cogs-breakdown" data-draft-cogs-breakdown>Chưa có dữ liệu giá vốn</em></span>
         <span class="profit"><small>LỢI NHUẬN</small><strong data-draft-profit>${money.format(0)}</strong></span>
       </div>
@@ -603,7 +636,7 @@ function updateOrderFinancials(order) {
       cogsParts.push({ label: addon.categoryName, amount: addonCogs });
     }
   }
-  const feeInput = order.querySelector("[data-sale-field='platformFee']");
+  const feeInput = order.querySelector("[data-sale-field='channelFee']");
   const fee = Math.max(0, parseMoney(feeInput.value) || 0);
   const profit = revenue - fee - cogs;
   order.querySelector("[data-draft-revenue]").textContent = money.format(revenue);
@@ -612,21 +645,63 @@ function updateOrderFinancials(order) {
     ? cogsParts.map((part) => `${part.label} ${money.format(part.amount)}`).join(" + ")
     : "Chưa có dữ liệu giá vốn";
   order.querySelector("[data-draft-profit]").textContent = money.format(profit);
-  order.querySelector("[data-sale-fee-percent]").textContent = `${revenue > 0 ? (fee * 100 / revenue).toLocaleString("vi-VN", { maximumFractionDigits: 2 }) : "0"}% doanh thu`;
+  const directChannel = directSalesChannels.has($("#sale-form").elements.channel.value);
+  order.querySelector("[data-sale-fee-percent]").textContent = directChannel
+    ? "Phí giao hàng"
+    : `${revenue > 0 ? (fee * 100 / revenue).toLocaleString("vi-VN", { maximumFractionDigits: 2 }) : "0"}% doanh thu`;
+}
+
+function applySaleChannelMode(resetFee = false) {
+  const channel = $("#sale-form").elements.channel.value;
+  const directChannel = directSalesChannels.has(channel);
+  const marketplaceChannel = marketplaceSalesChannels.has(channel);
+  [...document.querySelectorAll("[data-sale-order]")].forEach((order, index) => {
+    const codeInput = order.querySelector("[data-sale-field='orderCode']");
+    if (directChannel) {
+      codeInput.value = generateSaleOrderCode(index);
+      codeInput.dataset.generated = "true";
+    } else if (marketplaceChannel && codeInput.dataset.generated === "true") {
+      codeInput.value = "";
+      delete codeInput.dataset.generated;
+    }
+    if (resetFee) {
+      order.querySelector("[data-sale-field='channelFee']").value = "0";
+    }
+  });
 }
 
 function updateSaleBuilderSummary() {
   const orders = [...document.querySelectorAll("[data-sale-order]")];
-  const channelReady = Boolean($("#sale-form").elements.channel.value);
-  const channelName = channelLabels[$("#sale-form").elements.channel.value] || "kênh đã chọn";
+  const channel = $("#sale-form").elements.channel.value;
+  const channelReady = Boolean(channel);
+  const directChannel = directSalesChannels.has(channel);
+  const channelName = channelLabels[channel] || "kênh đã chọn";
   $("#sale-orders").classList.toggle("locked", !channelReady);
   $("#sale-form [data-sale-action='add-order']").disabled = !channelReady;
   orders.forEach((order, index) => {
     order.querySelector("[data-sale-order-number]").textContent = `Đơn hàng ${index + 1}`;
     order.querySelector("[data-sale-fee-channel]").textContent = channelName.toUpperCase();
-    order.querySelector("[data-sale-field='orderCode']").disabled = !channelReady;
-    order.querySelector("[data-sale-field='platformFee']").disabled = !channelReady;
-    order.querySelector("[data-sale-action='generate-order']").disabled = !channelReady;
+    order.querySelector("[data-sale-fee-label]").textContent = directChannel
+      ? "PHÍ VẬN CHUYỂN"
+      : "PHÍ SÀN";
+    const codeInput = order.querySelector("[data-sale-field='orderCode']");
+    codeInput.disabled = !channelReady;
+    codeInput.readOnly = directChannel;
+    codeInput.placeholder = directChannel ? "Hệ thống tự tạo mã" : "Nhập mã đơn từ sàn";
+    order.querySelector("[data-sale-code-help]").textContent = !channelReady
+      ? "Chọn kênh bán hàng trước"
+      : directChannel
+        ? "Mã được hệ thống tự động tạo"
+        : "Nhập đúng mã đơn trên sàn bán hàng";
+    const feeInput = order.querySelector("[data-sale-field='channelFee']");
+    feeInput.disabled = !channelReady;
+    feeInput.setAttribute("aria-label", directChannel ? "Phí vận chuyển" : "Phí sàn");
+    const customerFields = order.querySelector("[data-sale-customer-fields]");
+    customerFields.classList.toggle("hidden", !directChannel);
+    customerFields.querySelectorAll("input, textarea").forEach((field) => {
+      field.disabled = !directChannel;
+      field.required = directChannel;
+    });
     order.querySelector("[data-sale-action='add-item']").disabled = !channelReady;
     order.querySelector("[data-sale-action='remove-order']").disabled = !channelReady || orders.length === 1;
     const items = [...order.querySelectorAll("[data-sale-item]")];
@@ -732,6 +807,7 @@ function collectSalesPayload() {
   const form = $("#sale-form");
   const channel = form.elements.channel.value;
   if (!channel) throw new Error("Vui lòng chọn kênh bán hàng trước.");
+  const directChannel = directSalesChannels.has(channel);
   const seenOrderCodes = new Set();
   const stockNeeded = new Map();
   const orders = [...form.querySelectorAll("[data-sale-order]")].map((order, orderIndex) => {
@@ -767,7 +843,32 @@ function collectSalesPayload() {
         stockNeeded.set(addon.product.code, (stockNeeded.get(addon.product.code) || 0) + quantity);
       }
     }
-    return { orderCode, platformFee: parseMoney(order.querySelector("[data-sale-field='platformFee']").value), items };
+    const channelFee = parseMoney(order.querySelector("[data-sale-field='channelFee']").value);
+    if (!Number.isFinite(channelFee) || channelFee < 0) {
+      throw new Error(`${directChannel ? "Phí vận chuyển" : "Phí sàn"} của đơn ${orderCode} không hợp lệ.`);
+    }
+    let customerName = null;
+    let customerPhone = null;
+    let customerAddress = null;
+    if (directChannel) {
+      customerName = order.querySelector("[data-sale-field='customerName']").value.trim();
+      customerPhone = order.querySelector("[data-sale-field='customerPhone']").value.replace(/[\s.-]/g, "");
+      customerAddress = order.querySelector("[data-sale-field='customerAddress']").value.trim();
+      if (!customerName) throw new Error(`Vui lòng nhập tên khách hàng cho đơn ${orderCode}.`);
+      if (!/^0\d{9}$/.test(customerPhone)) {
+        throw new Error(`Số điện thoại khách hàng của đơn ${orderCode} phải gồm đúng 10 số và bắt đầu bằng số 0.`);
+      }
+      if (!customerAddress) throw new Error(`Vui lòng nhập địa chỉ cho đơn ${orderCode}.`);
+    }
+    return {
+      orderCode,
+      platformFee: directChannel ? 0 : channelFee,
+      shippingFee: directChannel ? channelFee : 0,
+      customerName,
+      customerPhone,
+      customerAddress,
+      items
+    };
   });
   for (const [code, quantity] of stockNeeded) {
     const product = findProduct(code);
@@ -801,7 +902,6 @@ async function refreshCore() {
   state.orders = orders;
   state.salesConfig = salesConfig;
   state.nextOrderCode = nextOrderCode;
-  saleOrderSequence = nextOrderCode.sequence;
   state.managers = managers;
   if (!$("#sale-form").elements.channel.value) resetSaleBuilder();
   renderDashboard();
@@ -1075,10 +1175,12 @@ saleForm.addEventListener("click", (event) => {
   const order = button.closest("[data-sale-order]");
   if (action === "add-order") {
     $("#sale-orders").insertAdjacentHTML("beforeend", saleOrderTemplate());
-  } else if (action === "generate-order") {
-    order.querySelector("[data-sale-field='orderCode']").value = generateSaleOrderCode();
+    applySaleChannelMode();
   } else if (action === "remove-order") {
-    if (saleForm.querySelectorAll("[data-sale-order]").length > 1) order.remove();
+    if (saleForm.querySelectorAll("[data-sale-order]").length > 1) {
+      order.remove();
+      applySaleChannelMode();
+    }
   } else if (action === "add-item") {
     order.querySelector(".sale-order-items").insertAdjacentHTML("beforeend", saleItemTemplate());
   } else if (action === "remove-item") {
@@ -1098,6 +1200,7 @@ saleForm.addEventListener("input", (event) => {
 });
 saleForm.addEventListener("change", (event) => {
   if (event.target.name === "channel") {
+    applySaleChannelMode(true);
     saleForm.querySelectorAll("[data-sale-item]").forEach((item) => updateSaleProductOptions(item));
     updateSaleBuilderSummary();
     return;
@@ -1139,9 +1242,8 @@ saleForm.addEventListener("submit", async (event) => {
     state.orderStatusFilter = "pending_pickup";
     await refreshAll();
     resetSaleBuilder();
-    toast(
-      `Đã tạo ${result.ordersCreated} đơn với ${result.mainItemsCreated} sản phẩm chính.`
-    );
+    const codes = Array.isArray(result.orderCodes) ? ` Mã đơn: ${result.orderCodes.join(", ")}.` : "";
+    toast(`Đã tạo ${result.ordersCreated} đơn với ${result.mainItemsCreated} sản phẩm chính.${codes}`);
   } catch (error) {
     errorElement.textContent = error.message;
     errorElement.classList.remove("hidden");
@@ -1156,10 +1258,10 @@ $("#order-status-tabs").addEventListener("click", (event) => {
   const button = event.target.closest("[data-order-filter]");
   if (!button) return;
   state.orderStatusFilter = button.dataset.orderFilter;
-  renderOrderHistory();
+  renderOrders();
 });
 
-$("#sale-order-history").addEventListener("click", async (event) => {
+$("#order-list").addEventListener("click", async (event) => {
   const button = event.target.closest("[data-order-status-action]");
   if (!button || button.disabled) return;
   const status = button.dataset.orderStatusAction;
@@ -1198,33 +1300,44 @@ $("#product-table").addEventListener("click", async (event) => {
   if (!button) return;
   const action = button.dataset.stockAction;
   if (action === "edit") {
-    state.editingStockProductId = Number(button.dataset.id);
+    state.editingInventoryProductId = Number(button.dataset.id);
     renderProducts();
-    $("#product-table [data-stock-value]")?.focus();
+    $("#product-table [data-inventory-value='stock']")?.focus();
     return;
   }
   if (action === "cancel") {
-    state.editingStockProductId = null;
+    state.editingInventoryProductId = null;
     renderProducts();
     return;
   }
   if (action === "save") {
     const id = Number(button.dataset.id);
-    const input = button.closest(".stock-edit").querySelector("[data-stock-value]");
-    const stock = Number(input.value);
+    const row = button.closest("tr");
+    const stock = Number(row.querySelector("[data-inventory-value='stock']").value);
+    const shippingCost = parseMoney(row.querySelector("[data-inventory-value='shippingCost']").value);
+    const landedCost = parseMoney(row.querySelector("[data-inventory-value='landedCost']").value);
+    const salePrice = parseMoney(row.querySelector("[data-inventory-value='salePrice']").value);
     if (!Number.isInteger(stock) || stock < 0) {
       toast("Số lượng tồn phải là số nguyên không âm.", "error");
       return;
     }
+    if (![shippingCost, landedCost, salePrice].every((value) => Number.isFinite(value) && value >= 0)) {
+      toast("Phí vận chuyển, giá vốn và giá bán phải là số không âm.", "error");
+      return;
+    }
+    if (landedCost < shippingCost) {
+      toast("Giá vốn không được nhỏ hơn phí vận chuyển.", "error");
+      return;
+    }
     button.disabled = true;
     try {
-      await api(`/api/products/${id}/stock`, {
+      await api(`/api/products/${id}/inventory`, {
         method: "PUT",
-        body: JSON.stringify({ stock })
+        body: JSON.stringify({ stock, shippingCost, landedCost, salePrice })
       });
-      state.editingStockProductId = null;
+      state.editingInventoryProductId = null;
       await refreshAll();
-      toast("Đã cập nhật số lượng tồn kho.");
+      toast("Đã cập nhật tồn kho, phí vận chuyển, giá vốn và giá bán.");
     } catch (error) {
       toast(error.message, "error");
       button.disabled = false;

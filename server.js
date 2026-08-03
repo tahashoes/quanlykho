@@ -18,14 +18,16 @@ const isProduction = process.env.NODE_ENV === "production";
 const cookieSecure = process.env.COOKIE_SECURE === "true";
 const sessionDays = 7;
 const salesChannels = ["facebook", "zalo", "tiktok", "shopee", "website", "lazada"];
+const directSalesChannels = new Set(["facebook", "zalo", "website"]);
+const marketplaceSalesChannels = new Set(["tiktok", "shopee", "lazada"]);
 const productUnits = ["đôi", "cái", "chai", "thùng", "cuộn", "tờ", "sấp"];
 const orderStatuses = [
   "pending_pickup",
   "shipping",
   "delivered",
   "completed",
-  "returned",
-  "cancelled"
+  "cancelled",
+  "returned"
 ];
 const lockedOrderStatuses = new Set(["completed", "returned", "cancelled"]);
 const reversedOrderStatuses = new Set(["returned", "cancelled"]);
@@ -173,6 +175,10 @@ db.exec(`
     status TEXT NOT NULL DEFAULT 'pending_pickup'
       CHECK(status IN ('pending_pickup', 'shipping', 'delivered', 'completed', 'returned', 'cancelled')),
     platform_fee REAL NOT NULL DEFAULT 0 CHECK(platform_fee >= 0),
+    shipping_fee REAL NOT NULL DEFAULT 0 CHECK(shipping_fee >= 0),
+    customer_name TEXT,
+    customer_phone TEXT,
+    customer_address TEXT,
     operator_name TEXT,
     stock_restored_at TEXT,
     created_at TEXT NOT NULL,
@@ -209,6 +215,10 @@ if (!salesOrdersTableSql.includes("'delivered'")) {
       status TEXT NOT NULL DEFAULT 'pending_pickup'
         CHECK(status IN ('pending_pickup', 'shipping', 'delivered', 'completed', 'returned', 'cancelled')),
       platform_fee REAL NOT NULL DEFAULT 0 CHECK(platform_fee >= 0),
+      shipping_fee REAL NOT NULL DEFAULT 0 CHECK(shipping_fee >= 0),
+      customer_name TEXT,
+      customer_phone TEXT,
+      customer_address TEXT,
       operator_name TEXT,
       stock_restored_at TEXT,
       created_at TEXT NOT NULL,
@@ -224,6 +234,10 @@ if (!salesOrdersTableSql.includes("'delivered'")) {
     COMMIT;
   `);
 }
+ensureColumn("sales_orders", "shipping_fee", "REAL NOT NULL DEFAULT 0 CHECK(shipping_fee >= 0)");
+ensureColumn("sales_orders", "customer_name", "TEXT");
+ensureColumn("sales_orders", "customer_phone", "TEXT");
+ensureColumn("sales_orders", "customer_address", "TEXT");
 const dataResetKey = "operational_data_reset_2026_08_03_v2";
 if (!db.prepare("SELECT key FROM app_meta WHERE key = ?").get(dataResetKey)) {
   db.exec("BEGIN IMMEDIATE");
@@ -424,6 +438,22 @@ function cleanManagerPhone(value) {
     throw new AppError("Số điện thoại quản lý phải gồm đúng 10 số và bắt đầu bằng số 0.");
   }
   return phone;
+}
+
+function cleanCustomerPhone(value) {
+  const phone = String(value ?? "").replace(/[\s.-]/g, "");
+  if (!/^0\d{9}$/.test(phone)) {
+    throw new AppError("Số điện thoại khách hàng phải gồm đúng 10 số và bắt đầu bằng số 0.");
+  }
+  return phone;
+}
+
+function cleanRequiredText(value, label, maximum) {
+  const result = cleanText(value, label);
+  if (result.length > maximum) {
+    throw new AppError(`${label} không được vượt quá ${maximum} ký tự.`);
+  }
+  return result;
 }
 
 function cleanManagerPassword(value, required = true) {
@@ -839,11 +869,15 @@ function dashboard() {
     FROM transactions t
     LEFT JOIN sales_orders so ON so.order_code = t.order_code
   `).get();
-  const platformFees = Number(db.prepare(`
-    SELECT COALESCE(SUM(platform_fee), 0) AS total
+  const salesFees = db.prepare(`
+    SELECT COALESCE(SUM(platform_fee), 0) AS platform_fees,
+           COALESCE(SUM(shipping_fee), 0) AS shipping_fees
     FROM sales_orders
     WHERE status NOT IN ('returned', 'cancelled')
-  `).get().total);
+  `).get();
+  const platformFees = Number(salesFees.platform_fees);
+  const shippingFees = Number(salesFees.shipping_fees);
+  const sellingFees = platformFees + shippingFees;
   const inventory = db.prepare(`
     SELECT COUNT(*) AS sku_count, COALESCE(SUM(stock), 0) AS total_units,
            COALESCE(SUM(stock * (cost_price + COALESCE(shipping_cost, 0))), 0)
@@ -854,7 +888,7 @@ function dashboard() {
   const recent = db.prepare(`
     SELECT t.id, t.kind, t.quantity, t.unit_price, t.unit_cost, t.sales_channel, t.order_code,
            t.operator_name, t.discount_type, t.discount_value, t.line_role,
-           so.status AS order_status, so.platform_fee,
+           so.status AS order_status, so.platform_fee, so.shipping_fee,
            t.created_at, p.code, p.name, p.category_id, p.size, p.color, p.unit,
            c.name AS category_name
     FROM transactions t
@@ -913,7 +947,9 @@ function dashboard() {
     purchaseExpense: Number(figures.purchase_expense),
     cogs: Number(figures.cogs),
     platformFees,
-    profit: Number(figures.revenue) - platformFees - Number(figures.cogs),
+    shippingFees,
+    sellingFees,
+    profit: Number(figures.revenue) - sellingFees - Number(figures.cogs),
     skuCount: Number(inventory.sku_count),
     totalUnits: Number(inventory.total_units),
     inventoryValue: Number(inventory.inventory_value),
@@ -954,6 +990,7 @@ function transactionView(row) {
     orderCode: row.order_code || null,
     orderStatus: row.order_status || null,
     platformFee: Number(row.platform_fee || 0),
+    shippingFee: Number(row.shipping_fee || 0),
     operatorName: row.operator_name || null,
     createdAt: row.created_at,
     code: row.code,
@@ -982,7 +1019,7 @@ function listTransactions(limit = 500) {
   return db.prepare(`
     SELECT t.id, t.kind, t.quantity, t.unit_price, t.unit_cost, t.sales_channel, t.order_code,
            t.operator_name, t.discount_type, t.discount_value, t.line_role,
-           so.status AS order_status, so.platform_fee,
+           so.status AS order_status, so.platform_fee, so.shipping_fee,
            t.created_at, p.code, p.name, p.category_id, p.size, p.color, p.unit,
            c.name AS category_name
     FROM transactions t
@@ -1126,6 +1163,40 @@ function adjustStock(id, body, user) {
   return productView(getProductByCode(product.code));
 }
 
+function updateInventoryProduct(id, body, user) {
+  const product = db.prepare("SELECT * FROM products WHERE id = ?").get(id);
+  if (!product) throw new AppError("Không tìm thấy sản phẩm.", 404);
+  const newStock = nonNegativeInteger(body.stock, "Số lượng tồn");
+  const shippingCost = nonNegativeNumber(body.shippingCost, "Phí vận chuyển");
+  const productLandedCost = nonNegativeNumber(body.landedCost, "Giá vốn");
+  const salePrice = nonNegativeNumber(body.salePrice, "Giá bán");
+  if (productLandedCost < shippingCost) {
+    throw new AppError("Giá vốn không được nhỏ hơn phí vận chuyển.");
+  }
+  const costPrice = productLandedCost - shippingCost;
+  const timestamp = now();
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    db.prepare(`
+      UPDATE products
+      SET stock = ?, cost_price = ?, shipping_cost = ?, sale_price = ?, updated_at = ?
+      WHERE id = ?
+    `).run(newStock, costPrice, shippingCost, salePrice, timestamp, id);
+    if (newStock !== Number(product.stock)) {
+      db.prepare(`
+        INSERT INTO stock_adjustments
+          (product_id, previous_stock, new_stock, operator_name, created_at)
+        VALUES (?, ?, ?, ?, ?)
+      `).run(id, Number(product.stock), newStock, user.name, timestamp);
+    }
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+  return productView(getProductByCode(product.code));
+}
+
 function getBundleProduct(categoryName) {
   return db.prepare(`
     SELECT p.*, c.name AS category_name, c.requires_size, c.price_note
@@ -1189,11 +1260,19 @@ function nextOrderCodeInfo(reservedCodes = new Set()) {
 
 function sellStock(body, user) {
   const channel = cleanChannel(body.channel);
+  const isDirectChannel = directSalesChannels.has(channel);
+  if (!isDirectChannel && !marketplaceSalesChannels.has(channel)) {
+    throw new AppError("Kênh bán hàng không hợp lệ.");
+  }
   const rawOrders = Array.isArray(body.orders)
     ? body.orders
     : [{
       orderCode: body.orderCode,
       platformFee: body.platformFee,
+      shippingFee: body.shippingFee,
+      customerName: body.customerName,
+      customerPhone: body.customerPhone,
+      customerAddress: body.customerAddress,
       items: [{
         code: body.code,
         quantity: body.quantity,
@@ -1231,8 +1310,9 @@ function sellStock(body, user) {
     };
 
     for (const [orderIndex, rawOrder] of rawOrders.entries()) {
-      const generatedCode = nextOrderCodeInfo(orderCodes).code;
-      const orderCode = cleanOrderCode(rawOrder?.orderCode || generatedCode);
+      const orderCode = isDirectChannel
+        ? nextOrderCodeInfo(orderCodes).code
+        : cleanOrderCode(rawOrder?.orderCode);
       if (orderCodes.has(orderCode)) {
         throw new AppError(`Mã đơn ${orderCode} đang bị nhập trùng trong đợt xuất.`);
       }
@@ -1249,7 +1329,21 @@ function sellStock(body, user) {
       if (rawItems.length > 50) {
         throw new AppError(`Đơn ${orderCode} chỉ được có tối đa 50 sản phẩm chính.`);
       }
-      const platformFee = nonNegativeNumber(rawOrder?.platformFee || 0, "Phí sàn");
+      const platformFee = isDirectChannel
+        ? 0
+        : nonNegativeNumber(rawOrder?.platformFee || 0, "Phí sàn");
+      const shippingFee = isDirectChannel
+        ? nonNegativeNumber(rawOrder?.shippingFee || 0, "Phí vận chuyển")
+        : 0;
+      const customerName = isDirectChannel
+        ? cleanRequiredText(rawOrder?.customerName, "Tên khách hàng", 120)
+        : null;
+      const customerPhone = isDirectChannel
+        ? cleanCustomerPhone(rawOrder?.customerPhone)
+        : null;
+      const customerAddress = isDirectChannel
+        ? cleanRequiredText(rawOrder?.customerAddress, "Địa chỉ khách hàng", 300)
+        : null;
       const orderProductCodes = new Set();
       const orderLines = [];
       let shoeUnits = 0;
@@ -1332,7 +1426,15 @@ function sellStock(body, user) {
         }
       }
 
-      preparedOrders.push({ orderCode, platformFee, lines: orderLines });
+      preparedOrders.push({
+        orderCode,
+        platformFee,
+        shippingFee,
+        customerName,
+        customerPhone,
+        customerAddress,
+        lines: orderLines
+      });
     }
 
     if (preparedLines.length > 300) {
@@ -1349,14 +1451,19 @@ function sellStock(body, user) {
 
     const insertOrder = db.prepare(`
       INSERT INTO sales_orders
-        (order_code, sales_channel, status, platform_fee, operator_name, created_at, updated_at)
-      VALUES (?, ?, 'pending_pickup', ?, ?, ?, ?)
+        (order_code, sales_channel, status, platform_fee, shipping_fee,
+         customer_name, customer_phone, customer_address, operator_name, created_at, updated_at)
+      VALUES (?, ?, 'pending_pickup', ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     for (const order of preparedOrders) {
       insertOrder.run(
         order.orderCode,
         channel,
         order.platformFee,
+        order.shippingFee,
+        order.customerName,
+        order.customerPhone,
+        order.customerAddress,
         user.name,
         timestamp,
         timestamp
@@ -1403,6 +1510,7 @@ function sellStock(body, user) {
     db.exec("COMMIT");
     return {
       ordersCreated: preparedOrders.length,
+      orderCodes: preparedOrders.map((order) => order.orderCode),
       mainItemsCreated: preparedLines.filter((line) => line.lineRole === "main").length,
       itemsCreated: preparedLines.length,
       products: [...stockRequirements.values()].map((item) => (
@@ -1424,6 +1532,8 @@ function orderView(order, itemRows) {
   const reversed = reversedOrderStatuses.has(order.status);
   const revenue = reversed ? 0 : originalRevenue;
   const platformFee = reversed ? 0 : Number(order.platform_fee || 0);
+  const shippingFee = reversed ? 0 : Number(order.shipping_fee || 0);
+  const sellingFee = platformFee + shippingFee;
   const cogs = reversed ? 0 : originalCogs;
   return {
     id: Number(order.id),
@@ -1431,14 +1541,19 @@ function orderView(order, itemRows) {
     channel: order.sales_channel,
     status: order.status,
     operatorName: order.operator_name || null,
+    customerName: order.customer_name || null,
+    customerPhone: order.customer_phone || null,
+    customerAddress: order.customer_address || null,
     createdAt: order.created_at,
     updatedAt: order.updated_at,
     stockRestoredAt: order.stock_restored_at || null,
     revenue,
     platformFee,
     platformFeePercent: revenue > 0 ? platformFee * 100 / revenue : 0,
+    shippingFee,
+    sellingFee,
     cogs,
-    profit: revenue - platformFee - cogs,
+    profit: revenue - sellingFee - cogs,
     items: mainItems,
     addons
   };
@@ -1474,7 +1589,7 @@ function listOrders({ start, end, status, id, limit = 500 } = {}) {
   const itemRows = db.prepare(`
     SELECT t.id, t.kind, t.quantity, t.unit_price, t.unit_cost, t.sales_channel, t.order_code,
            t.operator_name, t.discount_type, t.discount_value, t.line_role,
-           so.status AS order_status, so.platform_fee,
+           so.status AS order_status, so.platform_fee, so.shipping_fee,
            t.created_at, p.code, p.name, p.category_id, p.size, p.color, p.unit,
            c.name AS category_name
     FROM transactions t
@@ -1601,29 +1716,37 @@ function salesReport(period, anchor) {
   `).all(range.start, range.end);
   const feeRows = db.prepare(`
     SELECT COALESCE(sales_channel, 'unknown') AS channel,
-           COALESCE(SUM(platform_fee), 0) AS platform_fee
+           COALESCE(SUM(platform_fee), 0) AS platform_fee,
+           COALESCE(SUM(shipping_fee), 0) AS shipping_fee
     FROM sales_orders
     WHERE created_at >= ? AND created_at < ?
       AND status NOT IN ('returned', 'cancelled')
     GROUP BY COALESCE(sales_channel, 'unknown')
   `).all(range.start, range.end);
   const rowMap = new Map(rows.map((row) => [row.channel, row]));
-  const feeMap = new Map(feeRows.map((row) => [row.channel, Number(row.platform_fee)]));
+  const feeMap = new Map(feeRows.map((row) => [row.channel, {
+    platformFees: Number(row.platform_fee),
+    shippingFees: Number(row.shipping_fee)
+  }]));
   const availableChannels = [...salesChannels];
   if (rowMap.has("unknown")) availableChannels.push("unknown");
   const channels = availableChannels.map((channel) => {
     const row = rowMap.get(channel);
     const revenue = Number(row?.revenue || 0);
     const cogs = Number(row?.cogs || 0);
-    const platformFees = feeMap.get(channel) || 0;
+    const fees = feeMap.get(channel) || { platformFees: 0, shippingFees: 0 };
+    const { platformFees, shippingFees } = fees;
+    const sellingFees = platformFees + shippingFees;
     return {
       channel,
       orders: Number(row?.orders || 0),
       units: Number(row?.units || 0),
       revenue,
       platformFees,
+      shippingFees,
+      sellingFees,
       cogs,
-      profit: revenue - platformFees - cogs
+      profit: revenue - sellingFees - cogs
     };
   });
   const totals = channels.reduce((result, item) => ({
@@ -1631,9 +1754,20 @@ function salesReport(period, anchor) {
     units: result.units + item.units,
     revenue: result.revenue + item.revenue,
     platformFees: result.platformFees + item.platformFees,
+    shippingFees: result.shippingFees + item.shippingFees,
+    sellingFees: result.sellingFees + item.sellingFees,
     cogs: result.cogs + item.cogs,
     profit: result.profit + item.profit
-  }), { orders: 0, units: 0, revenue: 0, platformFees: 0, cogs: 0, profit: 0 });
+  }), {
+    orders: 0,
+    units: 0,
+    revenue: 0,
+    platformFees: 0,
+    shippingFees: 0,
+    sellingFees: 0,
+    cogs: 0,
+    profit: 0
+  });
   const products = db.prepare(`
     SELECT p.code, p.name,
            COUNT(DISTINCT COALESCE(t.order_code, 'LEGACY-' || t.id)) AS orders,
@@ -1921,6 +2055,14 @@ const server = createServer(async (request, response) => {
     const stockProductId = routeActionId(url.pathname, "/api/products", "stock");
     if (request.method === "PUT" && stockProductId !== null) {
       return json(response, 200, adjustStock(stockProductId, await readJson(request), user));
+    }
+    const inventoryProductId = routeActionId(url.pathname, "/api/products", "inventory");
+    if (request.method === "PUT" && inventoryProductId !== null) {
+      return json(
+        response,
+        200,
+        updateInventoryProduct(inventoryProductId, await readJson(request), user)
+      );
     }
     const statusOrderId = routeActionId(url.pathname, "/api/orders", "status");
     if (request.method === "PUT" && statusOrderId !== null) {

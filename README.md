@@ -10,20 +10,22 @@
 - Nhập lại một mã sản phẩm ngay trên cùng biểu mẫu sẽ cộng tồn và cập nhật giá nhập, phí vận chuyển bình quân; không còn màn hình “Bổ sung tồn”.
 - Lịch sử nhập hàng hiển thị sản phẩm, số lượng, đơn giá, người thực hiện và thời gian cập nhật.
 - Xuất nhiều đơn hàng cùng lúc cho một kênh; luồng chọn theo thứ tự kênh bán → danh mục → mã sản phẩm. Chỉ Giày và Xịt khử mùi được chọn làm sản phẩm xuất chính.
-- Mã đơn mặc định theo mẫu `TAHA-DDMMYYYY-001` và tự tăng theo từng ngày.
+- Facebook, Zalo và Website tự tạo mã đơn theo mẫu `TAHA-DDMMYYYY-001`, bắt buộc có tên khách hàng, số điện thoại, địa chỉ và phí vận chuyển.
+- TikTok, Shopee và Lazada bắt buộc nhập mã đơn từ sàn; các kênh này tiếp tục dùng phí sàn và hiển thị tỷ lệ phí trên doanh thu.
 - Đơn Giày tự trừ kho bộ hàng đi kèm cố định: Vớ 9.000đ, Xịt khử mùi 10.000đ, Thùng Carton 8.000đ, Băng keo 1.000đ và 1 tờ giấy in 200đ.
 - Giấy in có thể nhập theo sấp; hệ thống tự quy đổi 1 sấp thành 500 tờ và trừ 1 tờ cho mỗi đơn Giày.
-- Mỗi đơn có bốn tab tài chính theo đúng thứ tự DOANH THU → PHÍ SÀN → GIÁ VỐN → LỢI NHUẬN. Ô phí sàn nằm ngay trong tab PHÍ SÀN và tự quy đổi số tiền sang tỷ lệ phần trăm doanh thu; tab GIÁ VỐN liệt kê phép cộng chi phí của từng sản phẩm.
-- Sáu trạng thái đơn gồm Đang chờ lấy, Đang vận chuyển, Đã giao, Hoàn thành, Trả hàng và Hủy đơn. Hoàn thành/Trả hàng/Hủy đơn là trạng thái kết thúc; Trả/Hủy hoàn kho đúng một lần và đưa doanh thu đơn về 0.
+- Mỗi đơn có bốn tab tài chính theo đúng thứ tự DOANH THU → PHÍ SÀN hoặc PHÍ VẬN CHUYỂN → GIÁ VỐN → LỢI NHUẬN. Tab GIÁ VỐN liệt kê phép cộng chi phí của từng sản phẩm.
+- Tab Đơn hàng riêng hiển thị toàn bộ đơn theo sáu trạng thái: Đang chờ lấy hàng, Đang vận chuyển, Đã giao, Hoàn thành, Đã Hủy và Trả Hàng. Hoàn thành/Hủy/Trả là trạng thái kết thúc; Hủy/Trả hoàn kho đúng một lần và đưa doanh thu đơn về 0.
 - Hỗ trợ 6 kênh: Facebook, Zalo, TikTok, Shopee, Website và Lazada.
 - Mỗi sản phẩm chính trong đơn có số lượng và giá bán riêng; sản phẩm đi kèm dùng số lượng, đơn vị và giá vốn cố định, không sửa tại lúc xuất.
 - Một đợt xuất chỉ cập nhật khi toàn bộ đơn hợp lệ; nếu có một dòng sai hoặc không đủ tồn, kho không bị thay đổi.
-- Lịch sử xuất hàng gom theo mã đơn, hiển thị sản phẩm chính, hàng đi kèm, phí sàn, giá vốn, lợi nhuận và trạng thái.
+- Lịch sử xuất hàng là nhật ký chỉ đọc, ghi nhận thời gian, người xuất, mã đơn, kênh và từng sản phẩm đã xuất; không thao tác trạng thái tại lịch sử.
 - Khi chọn mã sản phẩm để xuất, giao diện hiển thị ngay tên, ảnh và số lượng tồn; ô số lượng báo đỏ tức thời nếu nhập vượt tồn kho.
 - Luồng xuất hàng đi theo thứ tự kênh bán → danh mục hàng hóa → mã sản phẩm, đồng thời hiển thị size, màu sắc và đơn vị tương ứng của hàng đã nhập.
 - Tồn kho giảm ngay khi xuất; không thể xuất vượt quá số lượng hiện có.
+- Tại Tồn kho có thể sửa trực tiếp số lượng tồn, phí vận chuyển, giá vốn và giá bán; giá nhập được tính lại bằng giá vốn trừ phí vận chuyển.
 - Báo cáo theo ngày, tuần hoặc tháng:
-  - doanh thu, phí sàn, giá vốn và lợi nhuận;
+  - doanh thu, phí bán hàng (phí sàn hoặc phí vận chuyển), giá vốn và lợi nhuận;
   - số đơn hàng bán ra;
   - tổng số lượng sản phẩm bán ra;
   - thống kê riêng từng kênh và tổng tất cả các kênh.
@@ -36,7 +38,7 @@
 - Số điện thoại quản lý phải có đúng 10 số, bắt đầu bằng số 0; mật khẩu tối thiểu 6 ký tự và có ít nhất một ký tự đặc biệt.
 - Quản lý được nhập hàng, xuất hàng, xem tồn kho và báo cáo nhưng không được quản lý tài khoản.
 
-Số đơn hàng được đếm theo mã đơn duy nhất, không phụ thuộc số dòng sản phẩm. Doanh thu chỉ tính sản phẩm chính. Giá vốn gồm giá nhập cộng phí vận chuyển của sản phẩm chính và toàn bộ giá cố định của hàng đi kèm. Lợi nhuận bằng doanh thu trừ phí sàn và giá vốn.
+Số đơn hàng được đếm theo mã đơn duy nhất, không phụ thuộc số dòng sản phẩm. Doanh thu chỉ tính sản phẩm chính. Giá vốn gồm giá nhập cộng phí vận chuyển của sản phẩm chính và toàn bộ giá cố định của hàng đi kèm. Đơn Facebook/Zalo/Website tính lợi nhuận bằng doanh thu trừ giá vốn và phí vận chuyển; đơn TikTok/Shopee/Lazada tính lợi nhuận bằng doanh thu trừ giá vốn và phí sàn.
 
 ## Reset dữ liệu của bản cập nhật 03/08/2026
 

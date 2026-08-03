@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { scryptSync } from "node:crypto";
-import { mkdirSync, rmSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
+import ExcelJS from "exceljs";
 
 const repoRoot = resolve(import.meta.dirname, "..");
 
@@ -129,6 +130,11 @@ test("luồng nhập/xuất theo danh mục, công thức lợi nhuận và rese
     assert.match(page, /data-view="orders">Đơn hàng/);
     assert.match(page, /id="sale-history-table"/);
     assert.match(page, /id="order-list"/);
+    assert.match(page, /id="order-overview"/);
+    assert.match(page, /data-period="quarter"/);
+    assert.match(page, /data-period="year"/);
+    assert.match(page, /data-report-export="xlsx"/);
+    assert.match(page, /data-report-export="pdf"/);
     const appScript = await (await fetch(`${baseUrl}/app.js`)).text();
     assert.match(appScript, /delivered: "Đã giao"/);
     assert.match(appScript, /cancelled: "Đã Hủy"/);
@@ -138,6 +144,9 @@ test("luồng nhập/xuất theo danh mục, công thức lợi nhuận và rese
     assert.match(appScript, /directSalesChannels/);
     assert.match(appScript, /customerAddress/);
     assert.match(appScript, /\/inventory/);
+    assert.match(appScript, /"Vớ": "VO-001"/);
+    assert.match(appScript, /"Xịt khử mùi": "XKM-001"/);
+    assert.match(appScript, /history-order-products/);
     const styles = await (await fetch(`${baseUrl}/styles.css`)).text();
     assert.match(styles, /input\.has-value/);
 
@@ -572,6 +581,87 @@ test("luồng nhập/xuất theo danh mục, công thức lợi nhuận và rese
     assert.equal(dashboardWithDirectOrder.sellingFees, 72000);
     assert.equal(dashboardWithDirectOrder.cogs, 312200);
     assert.equal(dashboardWithDirectOrder.profit, 85800);
+
+    const today = new Date();
+    const reportAnchor = [
+      today.getFullYear(),
+      String(today.getMonth() + 1).padStart(2, "0"),
+      String(today.getDate()).padStart(2, "0")
+    ].join("-");
+    for (const period of ["day", "week", "month", "quarter", "year"]) {
+      const report = await request(
+        baseUrl,
+        `/api/reports?period=${period}&anchor=${reportAnchor}`,
+        { headers: authHeaders }
+      );
+      assert.equal(report.payload.range.period, period);
+      assert.equal(report.payload.orders.length, 3);
+    }
+    const quarterReport = (await request(
+      baseUrl,
+      `/api/reports?period=quarter&anchor=${reportAnchor}`,
+      { headers: authHeaders }
+    )).payload;
+    const quarterStartMonth = String(Math.floor(today.getMonth() / 3) * 3 + 1).padStart(2, "0");
+    assert.equal(quarterReport.range.startDate, `${today.getFullYear()}-${quarterStartMonth}-01`);
+    const yearReport = (await request(
+      baseUrl,
+      `/api/reports?period=year&anchor=${reportAnchor}`,
+      { headers: authHeaders }
+    )).payload;
+    assert.equal(yearReport.range.startDate, `${today.getFullYear()}-01-01`);
+    assert.equal(yearReport.range.endDate, `${today.getFullYear()}-12-31`);
+    assert.equal(yearReport.totals.orders, 2, "đơn trả hàng không tính vào tổng hiệu quả");
+
+    const excelResponse = await fetch(
+      `${baseUrl}/api/reports/export?period=year&anchor=${reportAnchor}&format=xlsx`,
+      { headers: authHeaders }
+    );
+    assert.equal(excelResponse.status, 200);
+    assert.match(
+      excelResponse.headers.get("content-type"),
+      /application\/vnd\.openxmlformats-officedocument\.spreadsheetml\.sheet/
+    );
+    assert.match(excelResponse.headers.get("content-disposition"), /\.xlsx"$/);
+    const excelBuffer = Buffer.from(await excelResponse.arrayBuffer());
+    assert.equal(excelBuffer.subarray(0, 2).toString(), "PK");
+    assert.ok(excelBuffer.length > 7000);
+    const exportedWorkbook = new ExcelJS.Workbook();
+    await exportedWorkbook.xlsx.load(excelBuffer);
+    assert.deepEqual(exportedWorkbook.worksheets.map((sheet) => sheet.name), [
+      "Tổng quan",
+      "Đơn hàng"
+    ]);
+    assert.equal(exportedWorkbook.getWorksheet("Tổng quan").getCell("A1").value, "BÁO CÁO BÁN HÀNG - TAHA SHOES");
+    assert.equal(exportedWorkbook.getWorksheet("Tổng quan").getCell("A6").value.result, 2);
+    assert.equal(exportedWorkbook.getWorksheet("Đơn hàng").rowCount, 4);
+
+    const pdfResponse = await fetch(
+      `${baseUrl}/api/reports/export?period=year&anchor=${reportAnchor}&format=pdf`,
+      { headers: authHeaders }
+    );
+    assert.equal(pdfResponse.status, 200);
+    assert.match(pdfResponse.headers.get("content-type"), /application\/pdf/);
+    assert.match(pdfResponse.headers.get("content-disposition"), /\.pdf"$/);
+    const pdfBuffer = Buffer.from(await pdfResponse.arrayBuffer());
+    assert.equal(pdfBuffer.subarray(0, 5).toString(), "%PDF-");
+    assert.ok(pdfBuffer.length > 5000);
+    const artifactDirectory = process.env.REPORT_ARTIFACT_DIR;
+    if (artifactDirectory) {
+      mkdirSync(artifactDirectory, { recursive: true });
+      writeFileSync(join(artifactDirectory, "bao-cao-kiem-thu.xlsx"), excelBuffer);
+      writeFileSync(join(artifactDirectory, "bao-cao-kiem-thu.pdf"), pdfBuffer);
+    }
+
+    const invalidExport = await fetch(
+      `${baseUrl}/api/reports/export?period=year&anchor=${reportAnchor}&format=csv`,
+      { headers: authHeaders }
+    );
+    assert.equal(invalidExport.status, 400);
+    const unauthenticatedExport = await fetch(
+      `${baseUrl}/api/reports/export?period=year&anchor=${reportAnchor}&format=pdf`
+    );
+    assert.equal(unauthenticatedExport.status, 401);
 
     const manager = await request(baseUrl, "/api/managers", {
       method: "POST",

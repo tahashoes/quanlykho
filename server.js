@@ -9,6 +9,11 @@ import {
   timingSafeEqual
 } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
+import {
+  buildReportExcel,
+  buildReportPdf,
+  reportExportFilename
+} from "./report-export.js";
 
 const port = Number(process.env.PORT || 3000);
 const dataFile = process.env.DB_PATH || resolve("data", "quanlykho.db");
@@ -646,6 +651,17 @@ function json(response, status, body, headers = {}) {
     ...headers
   });
   response.end(JSON.stringify(body));
+}
+
+function download(response, body, contentType, filename) {
+  response.writeHead(200, {
+    "Content-Type": contentType,
+    "Content-Disposition": `attachment; filename="${filename}"`,
+    "Content-Length": body.length,
+    "Cache-Control": "no-store",
+    "X-Content-Type-Options": "nosniff"
+  });
+  response.end(body);
 }
 
 async function readJson(request) {
@@ -1658,7 +1674,7 @@ function localDateText(date) {
 }
 
 function periodRange(period, anchorValue) {
-  if (!["day", "week", "month"].includes(period)) {
+  if (!["day", "week", "month", "quarter", "year"].includes(period)) {
     throw new AppError("Khoảng thời gian báo cáo không hợp lệ.");
   }
   const anchorText = anchorValue || localDateText(new Date());
@@ -1681,11 +1697,18 @@ function periodRange(period, anchorValue) {
     start.setDate(start.getDate() - daysFromMonday);
   } else if (period === "month") {
     start.setDate(1);
+  } else if (period === "quarter") {
+    start.setDate(1);
+    start.setMonth(Math.floor(start.getMonth() / 3) * 3);
+  } else if (period === "year") {
+    start.setMonth(0, 1);
   }
   const end = new Date(start);
   if (period === "day") end.setDate(end.getDate() + 1);
   if (period === "week") end.setDate(end.getDate() + 7);
   if (period === "month") end.setMonth(end.getMonth() + 1);
+  if (period === "quarter") end.setMonth(end.getMonth() + 3);
+  if (period === "year") end.setFullYear(end.getFullYear() + 1);
   return {
     period,
     start: start.toISOString(),
@@ -2044,6 +2067,32 @@ const server = createServer(async (request, response) => {
         response,
         200,
         salesReport(url.searchParams.get("period") || "day", url.searchParams.get("anchor"))
+      );
+    }
+    if (request.method === "GET" && url.pathname === "/api/reports/export") {
+      const format = String(url.searchParams.get("format") || "").toLowerCase();
+      if (!["xlsx", "pdf"].includes(format)) {
+        throw new AppError("Định dạng xuất báo cáo không hợp lệ.");
+      }
+      const report = salesReport(
+        url.searchParams.get("period") || "day",
+        url.searchParams.get("anchor")
+      );
+      if (format === "xlsx") {
+        const body = await buildReportExcel(report);
+        return download(
+          response,
+          body,
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          reportExportFilename(report.range, "xlsx")
+        );
+      }
+      const body = await buildReportPdf(report);
+      return download(
+        response,
+        body,
+        "application/pdf",
+        reportExportFilename(report.range, "pdf")
       );
     }
     if (request.method === "POST" && url.pathname === "/api/products") {

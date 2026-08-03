@@ -52,6 +52,13 @@ const productUnitLabels = {
   "tờ": "Tờ",
   "sấp": "Sấp (500 tờ)"
 };
+const defaultProductCodes = {
+  "Vớ": "VO-001",
+  "Xịt khử mùi": "XKM-001",
+  "Băng keo": "KEO-001",
+  "Thùng Carton": "CARTON-001",
+  "Giấy in": "GIAYIN-001"
+};
 
 function localDateValue(date = new Date()) {
   const year = date.getFullYear();
@@ -382,7 +389,6 @@ function renderProducts(products = state.products) {
 
 function renderHistories() {
   const receiptRows = state.transactions.filter((item) => item.kind === "IN");
-  const saleRows = state.transactions.filter((item) => item.kind === "OUT");
 
   $("#receipt-history-table").innerHTML = receiptRows.length
     ? receiptRows.map((item) => {
@@ -390,13 +396,31 @@ function renderHistories() {
       return `<tr><td class="muted">${dateTime.format(new Date(item.createdAt))}</td><td><span class="operator-name">${text(item.operatorName || "Dữ liệu cũ")}</span></td><td><span class="category-chip">${text(item.categoryName)}</span></td><td class="product-code">${text(item.code)}</td><td>${variantHtml(item)}</td><td>${item.quantity.toLocaleString("vi-VN")}</td><td>${text(item.unit)}</td><td>${money.format(item.unitPrice)}</td><td>${money.format(shipping)}</td><td>${money.format(item.quantity * item.unitCost)}</td></tr>`;
     }).join("")
     : `<tr><td colspan="10" class="empty">Chưa có lịch sử nhập hàng.</td></tr>`;
-  $("#sale-history-table").innerHTML = saleRows.length
-    ? saleRows.map((item) => `<tr><td class="muted">${dateTime.format(new Date(item.createdAt))}</td><td><span class="operator-name">${text(item.operatorName || "Dữ liệu cũ")}</span></td><td class="product-name">${text(item.orderCode || "—")}</td><td><span class="channel-chip">${text(channelLabels[item.channel] || "Chưa xác định")}</span></td><td>${item.lineRole === "addon" ? '<span class="history-line-role addon">Đi kèm</span>' : '<span class="history-line-role">Chính</span>'}</td><td>${text(item.name)}</td><td class="product-code">${text(item.code)}</td><td>${item.quantity.toLocaleString("vi-VN")}</td><td>${text(item.unit)}</td></tr>`).join("")
-    : `<tr><td colspan="9" class="empty">Chưa có lịch sử xuất hàng.</td></tr>`;
+  $("#sale-history-table").innerHTML = state.orders.length
+    ? state.orders.map((order) => {
+      const mainProducts = order.items.map((item) => `<div class="history-main-product"><strong>${text(item.name)}</strong><span class="product-code">${text(item.code)}</span><span>${item.quantity.toLocaleString("vi-VN")} ${text(item.unit)}</span><small>${variantHtml(item)}</small></div>`).join("");
+      const addons = order.addons.length
+        ? `<div class="history-addon-list"><span>Đi kèm:</span>${order.addons.map((item) => `<small><b>${text(item.name)}</b> · ${item.quantity.toLocaleString("vi-VN")} ${text(item.unit)} · ${text(item.code)}</small>`).join("")}</div>`
+        : "";
+      return `<tr><td class="muted">${dateTime.format(new Date(order.createdAt))}</td><td><span class="operator-name">${text(order.operatorName || "Dữ liệu cũ")}</span></td><td class="product-name">${text(order.orderCode)}</td><td><span class="channel-chip">${text(channelLabels[order.channel] || "Chưa xác định")}</span></td><td><div class="history-order-products">${mainProducts}${addons}</div></td></tr>`;
+    }).join("")
+    : `<tr><td colspan="5" class="empty">Chưa có lịch sử xuất hàng.</td></tr>`;
   renderOrders();
 }
 
 function renderOrders() {
+  const overview = state.orders.reduce((result, order) => {
+    result.revenue += Number(order.revenue || 0);
+    result.costs += Number(order.cogs || 0) + Number(order.sellingFee || 0);
+    result.profit += Number(order.profit || 0);
+    return result;
+  }, { revenue: 0, costs: 0, profit: 0 });
+  $("#order-overview").innerHTML = [
+    ["TỔNG ĐƠN HÀNG", state.orders.length.toLocaleString("vi-VN"), "Tất cả trạng thái"],
+    ["DOANH THU", money.format(overview.revenue), "Các đơn còn hiệu lực"],
+    ["TỔNG CHI PHÍ", money.format(overview.costs), "Giá vốn + phí bán hàng"],
+    ["LỢI NHUẬN", money.format(overview.profit), "Doanh thu − tổng chi phí", "profit"]
+  ].map(([label, value, note, style = ""]) => `<article class="order-overview-card ${style}"><small>${label}</small><strong>${value}</strong><span>${note}</span></article>`).join("");
   const statuses = Object.keys(orderStatusLabels);
   $("#order-status-tabs").innerHTML = statuses.map((status) => {
     const count = state.orders.filter((order) => order.status === status).length;
@@ -532,6 +556,20 @@ function updateNewProductCategoryRules() {
   } else {
     unitSelect.innerHTML = unitOptions(category.defaultUnit);
   }
+  const codeInput = form.elements.code;
+  const defaultCode = defaultProductCodes[category?.name] || "";
+  if (defaultCode) {
+    codeInput.value = defaultCode;
+    codeInput.readOnly = true;
+    codeInput.placeholder = `Mã mặc định: ${defaultCode}`;
+    codeInput.dataset.defaultCode = defaultCode;
+  } else {
+    if (codeInput.value === codeInput.dataset.defaultCode) codeInput.value = "";
+    codeInput.readOnly = false;
+    codeInput.placeholder = category?.name === "Giày" ? "Nhập mã giày" : "VD: MA-SP-001";
+    delete codeInput.dataset.defaultCode;
+  }
+  syncFilledField(codeInput);
   if (!fields.image) clearProductImage();
   $("#new-product-price-note").textContent = category ? `(${category.priceNote})` : "";
 }
@@ -1369,6 +1407,48 @@ $("#report-anchor").value = state.reportAnchor;
 $("#report-anchor").addEventListener("change", (event) => {
   state.reportAnchor = event.target.value || localDateValue();
   refreshReport().catch((error) => toast(error.message, "error"));
+});
+
+async function downloadReport(format, button) {
+  const query = new URLSearchParams({
+    period: state.reportPeriod,
+    anchor: state.reportAnchor,
+    format
+  });
+  const originalText = button.textContent;
+  button.disabled = true;
+  button.textContent = "Đang tạo file...";
+  try {
+    const response = await fetch(`/api/reports/export?${query}`, {
+      credentials: "same-origin"
+    });
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({}));
+      if (response.status === 401) showLogin();
+      throw new Error(payload.error || "Không thể xuất báo cáo.");
+    }
+    const disposition = response.headers.get("content-disposition") || "";
+    const filename = /filename="([^"]+)"/.exec(disposition)?.[1] ||
+      `bao-cao-ban-hang.${format}`;
+    const url = URL.createObjectURL(await response.blob());
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    document.body.append(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    toast(`Đã xuất báo cáo ${format === "xlsx" ? "Excel" : "PDF"}.`);
+  } catch (error) {
+    toast(error.message, "error");
+  } finally {
+    button.disabled = false;
+    button.textContent = originalText;
+  }
+}
+
+document.querySelectorAll("[data-report-export]").forEach((button) => {
+  button.addEventListener("click", () => downloadReport(button.dataset.reportExport, button));
 });
 
 $("#manager-form").addEventListener("submit", async (event) => {

@@ -175,13 +175,14 @@
           </article>
           <article class="card full-card history-card order-history-shell">
             <div class="card-heading order-history-heading"><div><p class="eyebrow">Nhật ký kho</p><h2>Lịch sử xuất hàng</h2></div><span class="history-help">Chỉ ghi nhận thông tin xuất kho, không thao tác trạng thái tại đây</span></div>
-            <div class="table-wrap"><table><thead><tr><th>Thời gian</th><th>Người xuất</th><th>Mã đơn</th><th>Kênh</th><th>Loại hàng</th><th>Sản phẩm</th><th>Mã SP</th><th>Số lượng</th><th>Đơn vị</th></tr></thead><tbody id="sale-history-table"></tbody></table></div>
+            <div class="table-wrap"><table class="sale-history-table"><thead><tr><th>Thời gian</th><th>Người xuất</th><th>Mã đơn</th><th>Kênh</th><th>Sản phẩm đã xuất</th></tr></thead><tbody id="sale-history-table"></tbody></table></div>
           </article>
         </section>
 
         <section class="view" id="orders-view">
           <article class="card full-card history-card order-history-shell">
             <div class="card-heading order-history-heading"><div><p class="eyebrow">Quản lý trạng thái</p><h2>Tất cả đơn hàng</h2></div><span class="history-help">Theo dõi và chuyển trạng thái đơn tại đây</span></div>
+            <div class="order-overview-grid" id="order-overview"></div>
             <div class="order-status-tabs" id="order-status-tabs"></div>
             <div class="order-history-list" id="order-list"></div>
           </article>
@@ -197,8 +198,9 @@
         <section class="view" id="reports-view">
           <article class="card report-filter">
             <div><p class="eyebrow">Khoảng thống kê</p><h2 id="report-range-label">Báo cáo hôm nay</h2></div>
-            <div class="period-tabs"><button class="period-button active" data-period="day">Theo ngày</button><button class="period-button" data-period="week">Theo tuần</button><button class="period-button" data-period="month">Theo tháng</button></div>
+            <div class="period-tabs"><button class="period-button active" data-period="day">Theo ngày</button><button class="period-button" data-period="week">Theo tuần</button><button class="period-button" data-period="month">Theo tháng</button><button class="period-button" data-period="quarter">Theo quý</button><button class="period-button" data-period="year">Theo năm</button></div>
             <label class="date-filter">Chọn ngày<input id="report-anchor" type="date" /></label>
+            <div class="report-export-actions"><button class="button report-export-button excel" type="button" data-report-export="xlsx">Xuất Excel</button><button class="button report-export-button pdf" type="button" data-report-export="pdf">Xuất PDF</button></div>
           </article>
           <div class="metric-grid report-metrics" id="report-metrics"></div>
           <div class="analytics-grid report-analytics">

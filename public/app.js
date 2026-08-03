@@ -33,11 +33,13 @@ const channelLabels = {
 const orderStatusLabels = {
   pending_pickup: "Đang chờ lấy",
   shipping: "Đang vận chuyển",
+  delivered: "Đã giao",
   completed: "Hoàn thành",
   returned: "Trả hàng",
   cancelled: "Hủy đơn"
 };
-const terminalOrderStatuses = new Set(["returned", "cancelled"]);
+const lockedOrderStatuses = new Set(["completed", "returned", "cancelled"]);
+const reversedOrderStatuses = new Set(["returned", "cancelled"]);
 const productUnitLabels = {
   "đôi": "Đôi",
   "cái": "Cái",
@@ -378,16 +380,17 @@ function renderOrderHistory() {
           `<span class="order-addon-item"><strong>${text(item.name)}</strong><small>${item.quantity.toLocaleString("vi-VN")} ${text(item.unit)} · ${money.format(item.unitPrice)}</small></span>`
         )).join("")}</div></div>`
         : "";
-      const terminal = terminalOrderStatuses.has(order.status);
-      const statusActions = Object.entries(orderStatusLabels).map(([status, label]) => (
-        `<button class="order-status-action${order.status === status ? " active" : ""}${status === "returned" || status === "cancelled" ? " danger" : ""}" data-order-status-action="${status}" data-id="${order.id}"${terminal || order.status === status ? " disabled" : ""}>${text(label)}</button>`
-      )).join("");
+      const locked = lockedOrderStatuses.has(order.status);
+      const statusActions = Object.entries(orderStatusLabels).map(([status, label]) => {
+        const active = order.status === status;
+        return `<button class="order-status-action status-${status}${active ? " active" : ""}${reversedOrderStatuses.has(status) ? " danger" : ""}" data-order-status-action="${status}" data-id="${order.id}" aria-pressed="${active}"${active ? " aria-current=\"step\"" : ""}${locked || active ? " disabled" : ""}>${active ? '<span class="order-status-check" aria-hidden="true">✓</span>' : ""}<span>${text(label)}</span></button>`;
+      }).join("");
       return `<article class="order-history-card">
         <header class="order-history-card-header"><div><strong>${text(order.orderCode)}</strong><small>${dateTime.format(new Date(order.createdAt))} · ${text(order.operatorName || "Dữ liệu cũ")}</small></div><div><span class="channel-chip">${text(channelLabels[order.channel] || "Chưa xác định")}</span><span class="order-status-badge status-${order.status}">${text(orderStatusLabels[order.status])}</span></div></header>
         <div class="order-main-products"><span class="order-section-label">Sản phẩm chính</span>${mainProducts}</div>
         ${addons}
         <div class="order-finance-tabs"><span><small>DOANH THU</small><strong>${money.format(order.revenue)}</strong></span><span><small>PHÍ SÀN</small><strong>${money.format(order.platformFee)}</strong><em>${Number(order.platformFeePercent).toLocaleString("vi-VN", { maximumFractionDigits: 2 })}%</em></span><span><small>GIÁ VỐN</small><strong>${money.format(order.cogs)}</strong></span><span class="profit"><small>LỢI NHUẬN</small><strong>${money.format(order.profit)}</strong></span></div>
-        <div class="order-status-actions"><span>Chuyển trạng thái</span><div>${statusActions}</div></div>
+        <div class="order-status-actions${locked ? " locked" : ""}"><span>${locked ? "Đơn đã kết thúc" : "Chuyển trạng thái đơn"}</span><div>${statusActions}</div></div>
       </article>`;
     }).join("")
     : `<p class="empty order-empty">Chưa có đơn ở trạng thái ${text(orderStatusLabels[state.orderStatusFilter].toLowerCase())}.</p>`;
@@ -1102,11 +1105,13 @@ $("#sale-order-history").addEventListener("click", async (event) => {
   if (!button || button.disabled) return;
   const status = button.dataset.orderStatusAction;
   const id = Number(button.dataset.id);
-  if (terminalOrderStatuses.has(status)) {
+  if (lockedOrderStatuses.has(status)) {
     const confirmed = window.confirm(
-      status === "returned"
-        ? "Xác nhận trả hàng? Toàn bộ sản phẩm sẽ được cộng lại vào tồn kho và doanh thu đơn sẽ về 0."
-        : "Xác nhận hủy đơn? Toàn bộ sản phẩm sẽ được cộng lại vào tồn kho và doanh thu đơn sẽ về 0."
+      status === "completed"
+        ? "Xác nhận hoàn thành đơn? Sau khi hoàn thành, đơn sẽ kết thúc và không thể chuyển trạng thái nữa."
+        : status === "returned"
+          ? "Xác nhận trả hàng? Toàn bộ sản phẩm sẽ được cộng lại vào tồn kho, doanh thu đơn sẽ về 0 và không thể chuyển trạng thái nữa."
+          : "Xác nhận hủy đơn? Toàn bộ sản phẩm sẽ được cộng lại vào tồn kho, doanh thu đơn sẽ về 0 và không thể chuyển trạng thái nữa."
     );
     if (!confirmed) return;
   }
@@ -1118,9 +1123,11 @@ $("#sale-order-history").addEventListener("click", async (event) => {
     });
     state.orderStatusFilter = status;
     await refreshAll();
-    toast(terminalOrderStatuses.has(status)
+    toast(reversedOrderStatuses.has(status)
       ? "Đã hoàn toàn bộ sản phẩm về kho và cập nhật doanh thu."
-      : `Đã chuyển đơn sang ${orderStatusLabels[status].toLowerCase()}.`);
+      : status === "completed"
+        ? "Đơn đã hoàn thành và kết thúc trạng thái."
+        : `Đã chuyển đơn sang ${orderStatusLabels[status].toLowerCase()}.`);
   } catch (error) {
     toast(error.message, "error");
     button.disabled = false;
@@ -1299,6 +1306,53 @@ $("#admin-password-form").addEventListener("submit", async (event) => {
   } finally {
     button.disabled = false;
     button.textContent = "Cập nhật mật khẩu admin";
+  }
+});
+
+const adminDataResetForm = $("#admin-data-reset-form");
+const adminDataResetButton = $("#admin-data-reset-button");
+adminDataResetForm.elements.confirmed.addEventListener("change", () => {
+  adminDataResetButton.disabled = !adminDataResetForm.elements.confirmed.checked;
+});
+
+adminDataResetForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const errorElement = $("#admin-data-reset-error");
+  errorElement.textContent = "";
+  errorElement.classList.add("hidden");
+  if (!adminDataResetForm.elements.confirmed.checked) {
+    errorElement.textContent = "Bạn cần xác nhận đã hiểu dữ liệu sẽ bị xóa vĩnh viễn.";
+    errorElement.classList.remove("hidden");
+    return;
+  }
+  if (!window.confirm(
+    "Xóa toàn bộ dữ liệu nhập hàng, xuất hàng và lịch sử? Thao tác này không thể hoàn tác."
+  )) return;
+
+  adminDataResetButton.disabled = true;
+  adminDataResetButton.textContent = "ĐANG XÓA DỮ LIỆU...";
+  try {
+    const result = await api("/api/admin/operational-data", {
+      method: "DELETE",
+      body: JSON.stringify({
+        password: adminDataResetForm.elements.password.value,
+        confirmation: "DELETE_OPERATIONAL_DATA"
+      })
+    });
+    adminDataResetForm.reset();
+    state.orderStatusFilter = "pending_pickup";
+    resetSaleBuilder();
+    await refreshAll();
+    toast(
+      `Đã xóa ${result.deleted.products.toLocaleString("vi-VN")} sản phẩm và ${result.deleted.orders.toLocaleString("vi-VN")} đơn hàng cùng toàn bộ lịch sử.`
+    );
+  } catch (error) {
+    errorElement.textContent = error.message;
+    errorElement.classList.remove("hidden");
+    toast(error.message, "error");
+  } finally {
+    adminDataResetButton.textContent = "XÓA TOÀN BỘ DỮ LIỆU";
+    adminDataResetButton.disabled = !adminDataResetForm.elements.confirmed.checked;
   }
 });
 

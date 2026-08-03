@@ -256,6 +256,26 @@
               </form>
             </article>
           </div>
+          <article class="card full-card admin-data-reset-card">
+            <div class="card-heading"><div><p class="eyebrow">Vùng thao tác nguy hiểm</p><h2>Xóa dữ liệu nhập hàng, xuất hàng và lịch sử</h2></div><span class="danger-badge">Chỉ admin</span></div>
+            <div class="admin-data-reset-layout">
+              <div class="admin-data-reset-copy">
+                <p>Thao tác này sẽ xóa toàn bộ sản phẩm và tồn kho, lịch sử nhập hàng, đơn xuất, lịch sử xuất hàng và lịch sử chỉnh tồn.</p>
+                <p><strong>Tài khoản đăng nhập và các danh mục hàng hóa vẫn được giữ nguyên.</strong> Dữ liệu đã xóa không thể khôi phục trực tiếp trên website.</p>
+              </div>
+              <form id="admin-data-reset-form" class="admin-data-reset-form" novalidate>
+                <label><span class="field-label">Nhập mật khẩu admin để xác nhận</span>
+                  <span class="password-field">
+                    <input id="admin-data-reset-password" required name="password" type="password" autocomplete="current-password" minlength="8" placeholder="Mật khẩu admin hiện tại" />
+                    <button class="password-toggle" type="button" data-toggle-password="admin-data-reset-password" aria-label="Hiện mật khẩu" title="Hiện mật khẩu">◉</button>
+                  </span>
+                </label>
+                <label class="danger-confirm"><input name="confirmed" type="checkbox" /> <span>Tôi hiểu dữ liệu nhập, xuất và lịch sử sẽ bị xóa vĩnh viễn.</span></label>
+                <p class="form-error hidden" id="admin-data-reset-error"></p>
+                <button class="button button-danger" id="admin-data-reset-button" type="submit" disabled>XÓA TOÀN BỘ DỮ LIỆU</button>
+              </form>
+            </div>
+          </article>
           <article class="card full-card manager-table-card">
             <div class="card-heading"><div><p class="eyebrow">Danh sách tài khoản</p><h2>Quản lý đang hoạt động</h2></div></div>
             <div class="table-wrap"><table><thead><tr><th>Tên người quản lý</th><th>Số điện thoại</th><th>Vai trò</th><th>Ngày tạo</th><th>Cập nhật</th><th>Thao tác</th></tr></thead><tbody id="manager-table"></tbody></table></div>

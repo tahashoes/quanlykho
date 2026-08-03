@@ -13,6 +13,7 @@ import { DatabaseSync } from "node:sqlite";
 const port = Number(process.env.PORT || 3000);
 const dataFile = process.env.DB_PATH || resolve("data", "quanlykho.db");
 const publicDir = resolve("public");
+const appVersion = String(process.env.APP_VERSION || "local").trim() || "local";
 const isProduction = process.env.NODE_ENV === "production";
 const cookieSecure = process.env.COOKIE_SECURE === "true";
 const sessionDays = 7;
@@ -1863,6 +1864,10 @@ const server = createServer(async (request, response) => {
   try {
     if (!url.pathname.startsWith("/api/")) {
       return await serveStatic(response, url);
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/health") {
+      return json(response, 200, { ok: true, version: appVersion });
     }
 
     if (request.method === "POST" && url.pathname === "/api/auth/login") {

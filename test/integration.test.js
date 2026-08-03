@@ -109,6 +109,7 @@ test("luồng nhập/xuất theo danh mục, công thức lợi nhuận và rese
       ADMIN_LOGIN: "admin@tahashoes",
       ADMIN_PASSWORD: "Admin@123",
       ADMIN_CREDENTIALS_VERSION: "integration-admin-v1",
+      APP_VERSION: "integration-test-sha",
       COOKIE_SECURE: "false"
     },
     stdio: ["ignore", "pipe", "pipe"]
@@ -118,6 +119,9 @@ test("luồng nhập/xuất theo danh mục, công thức lợi nhuận và rese
 
   try {
     await waitForServer(baseUrl, child);
+
+    const health = await request(baseUrl, "/api/health");
+    assert.deepEqual(health.payload, { ok: true, version: "integration-test-sha" });
 
     const page = await (await fetch(baseUrl)).text();
     assert.match(page, /THÊM DANH MỤC MỚI/);

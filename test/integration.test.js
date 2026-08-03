@@ -126,11 +126,18 @@ test("luồng nhập/xuất theo danh mục, công thức lợi nhuận và rese
     const page = await (await fetch(baseUrl)).text();
     assert.match(page, /THÊM DANH MỤC MỚI/);
     assert.doesNotMatch(page, /Bổ sung tồn|Nhập thêm hàng/);
+    assert.match(page, /data-view="orders">Đơn hàng/);
+    assert.match(page, /id="sale-history-table"/);
+    assert.match(page, /id="order-list"/);
     const appScript = await (await fetch(`${baseUrl}/app.js`)).text();
     assert.match(appScript, /delivered: "Đã giao"/);
+    assert.match(appScript, /cancelled: "Đã Hủy"/);
     assert.match(appScript, /data-sale-stock-note/);
     assert.match(appScript, /Tồn không đủ/);
     assert.match(appScript, /data-draft-cogs-breakdown/);
+    assert.match(appScript, /directSalesChannels/);
+    assert.match(appScript, /customerAddress/);
+    assert.match(appScript, /\/inventory/);
     const styles = await (await fetch(`${baseUrl}/styles.css`)).text();
     assert.match(styles, /input\.has-value/);
 
@@ -218,6 +225,35 @@ test("luồng nhập/xuất theo danh mục, công thức lợi nhuận và rese
     assert.equal(restockedShoe.landedCost, 112000);
     assert.equal(restockedShoe.salePrice, 210000);
 
+    const editedShoe = (await request(baseUrl, `/api/products/${restockedShoe.id}/inventory`, {
+      method: "PUT",
+      headers: authHeaders,
+      body: JSON.stringify({
+        stock: 16,
+        shippingCost: "12,000",
+        landedCost: "125,000",
+        salePrice: "220,000"
+      })
+    })).payload;
+    assert.equal(editedShoe.stock, 16);
+    assert.equal(editedShoe.costPrice, 113000);
+    assert.equal(editedShoe.shippingCost, 12000);
+    assert.equal(editedShoe.landedCost, 125000);
+    assert.equal(editedShoe.salePrice, 220000);
+    await assert.rejects(
+      request(baseUrl, `/api/products/${restockedShoe.id}/inventory`, {
+        method: "PUT",
+        headers: authHeaders,
+        body: JSON.stringify({
+          stock: 16,
+          shippingCost: 13000,
+          landedCost: 12000,
+          salePrice: 220000
+        })
+      }),
+      /Giá vốn không được nhỏ hơn phí vận chuyển/
+    );
+
     await assert.rejects(
       createProduct({
         categoryId: categories["Giày"].id,
@@ -302,6 +338,27 @@ test("luồng nhập/xuất theo danh mục, công thức lợi nhuận và rese
         body: JSON.stringify({
           channel: "shopee",
           orders: [{
+            orderCode: "",
+            platformFee: 0,
+            items: [{
+              categoryId: categories["Xịt khử mùi"].id,
+              code: "XIT-MD",
+              quantity: 1,
+              salePrice: 50000
+            }]
+          }]
+        })
+      }),
+      /Mã đơn hàng không được để trống/
+    );
+
+    await assert.rejects(
+      request(baseUrl, "/api/sales", {
+        method: "POST",
+        headers: authHeaders,
+        body: JSON.stringify({
+          channel: "shopee",
+          orders: [{
             orderCode: "INVALID-MAIN-01",
             platformFee: 0,
             items: [{
@@ -339,7 +396,7 @@ test("luồng nhập/xuất theo danh mục, công thức lợi nhuận và rese
 
     let products = (await request(baseUrl, "/api/products", { headers: authHeaders })).payload;
     const stockOf = (code) => products.find((product) => product.code === code).stock;
-    assert.equal(stockOf("GIAY-TEST-01"), 13);
+    assert.equal(stockOf("GIAY-TEST-01"), 14);
     assert.equal(stockOf("VO-MD"), 18);
     assert.equal(stockOf("XIT-MD"), 18);
     assert.equal(stockOf("CARTON-MD"), 18);
@@ -351,16 +408,20 @@ test("luồng nhập/xuất theo danh mục, công thức lợi nhuận và rese
     assert.equal(orders[0].revenue, 420000);
     assert.equal(orders[0].platformFee, 42000);
     assert.equal(orders[0].platformFeePercent, 10);
-    assert.equal(orders[0].cogs, 280200);
-    assert.equal(orders[0].profit, 97800);
+    assert.equal(orders[0].shippingFee, 0);
+    assert.equal(orders[0].sellingFee, 42000);
+    assert.equal(orders[0].cogs, 306200);
+    assert.equal(orders[0].profit, 71800);
 
     const dashboard = (await request(baseUrl, "/api/dashboard", {
       headers: authHeaders
     })).payload;
     assert.equal(dashboard.revenue, 420000);
     assert.equal(dashboard.platformFees, 42000);
-    assert.equal(dashboard.cogs, 280200);
-    assert.equal(dashboard.profit, 97800);
+    assert.equal(dashboard.shippingFees, 0);
+    assert.equal(dashboard.sellingFees, 42000);
+    assert.equal(dashboard.cogs, 306200);
+    assert.equal(dashboard.profit, 71800);
 
     const removedReceiptEndpoint = await fetch(`${baseUrl}/api/receipts`, {
       method: "POST",
@@ -388,7 +449,7 @@ test("luồng nhập/xuất theo danh mục, công thức lợi nhuận và rese
     });
     assert.equal(completed.payload.status, "completed");
     assert.equal(completed.payload.revenue, 420000);
-    assert.equal(completed.payload.cogs, 280200);
+    assert.equal(completed.payload.cogs, 306200);
     await assert.rejects(
       request(baseUrl, `/api/orders/${orders[0].id}/status`, {
         method: "PUT",
@@ -433,7 +494,7 @@ test("luồng nhập/xuất theo danh mục, công thức lợi nhuận và rese
     assert.equal(returned.payload.profit, 0);
 
     products = (await request(baseUrl, "/api/products", { headers: authHeaders })).payload;
-    assert.equal(stockOf("GIAY-TEST-01"), 13);
+    assert.equal(stockOf("GIAY-TEST-01"), 14);
     assert.equal(stockOf("VO-MD"), 18);
     assert.equal(stockOf("GIAY-IN-MD"), 499);
 
@@ -443,7 +504,74 @@ test("luồng nhập/xuất theo danh mục, công thức lợi nhuận và rese
       body: JSON.stringify({ status: "returned" })
     });
     products = (await request(baseUrl, "/api/products", { headers: authHeaders })).payload;
-    assert.equal(stockOf("GIAY-TEST-01"), 13, "không được hoàn kho hai lần");
+    assert.equal(stockOf("GIAY-TEST-01"), 14, "không được hoàn kho hai lần");
+
+    await assert.rejects(
+      request(baseUrl, "/api/sales", {
+        method: "POST",
+        headers: authHeaders,
+        body: JSON.stringify({
+          channel: "facebook",
+          orders: [{
+            shippingFee: 30000,
+            items: [{
+              categoryId: categories["Xịt khử mùi"].id,
+              code: "XIT-MD",
+              quantity: 1,
+              salePrice: 50000
+            }]
+          }]
+        })
+      }),
+      /Tên khách hàng không được để trống/
+    );
+
+    const directSale = await request(baseUrl, "/api/sales", {
+      method: "POST",
+      headers: authHeaders,
+      body: JSON.stringify({
+        channel: "facebook",
+        orders: [{
+          orderCode: "KHONG-DUOC-DUNG-MA-NAY",
+          platformFee: 999999,
+          shippingFee: "30,000",
+          customerName: "Nguyễn Văn Khách",
+          customerPhone: "0901.234.567",
+          customerAddress: "123 Đường Kiểm Thử, Cần Thơ",
+          items: [{
+            categoryId: categories["Xịt khử mùi"].id,
+            code: "XIT-MD",
+            quantity: 1,
+            salePrice: "50,000"
+          }]
+        }]
+      })
+    });
+    assert.match(directSale.payload.orderCodes[0], /^TAHA-\d{8}-003$/);
+    assert.notEqual(directSale.payload.orderCodes[0], "KHONG-DUOC-DUNG-MA-NAY");
+    const directOrder = (await request(baseUrl, "/api/orders", {
+      headers: authHeaders
+    })).payload.find((order) => order.orderCode === directSale.payload.orderCodes[0]);
+    assert.equal(directOrder.channel, "facebook");
+    assert.equal(directOrder.customerName, "Nguyễn Văn Khách");
+    assert.equal(directOrder.customerPhone, "0901234567");
+    assert.equal(directOrder.customerAddress, "123 Đường Kiểm Thử, Cần Thơ");
+    assert.equal(directOrder.platformFee, 0);
+    assert.equal(directOrder.shippingFee, 30000);
+    assert.equal(directOrder.sellingFee, 30000);
+    assert.equal(directOrder.revenue, 50000);
+    assert.equal(directOrder.cogs, 6000);
+    assert.equal(directOrder.profit, 14000);
+
+    const dashboardWithDirectOrder = (await request(baseUrl, "/api/dashboard", {
+      headers: authHeaders
+    })).payload;
+    assert.equal(dashboardWithDirectOrder.revenue, 470000);
+    assert.equal(dashboardWithDirectOrder.platformFees, 42000);
+    assert.equal(dashboardWithDirectOrder.shippingFees, 30000);
+    assert.equal(dashboardWithDirectOrder.sellingFees, 72000);
+    assert.equal(dashboardWithDirectOrder.cogs, 312200);
+    assert.equal(dashboardWithDirectOrder.profit, 85800);
 
     const manager = await request(baseUrl, "/api/managers", {
       method: "POST",
@@ -490,7 +618,7 @@ test("luồng nhập/xuất theo danh mục, công thức lợi nhuận và rese
       })
     });
     assert.equal(purged.payload.deleted.products, 6);
-    assert.equal(purged.payload.deleted.orders, 2);
+    assert.equal(purged.payload.deleted.orders, 3);
     assert.equal(purged.payload.categoriesPreserved, 7);
     assert.deepEqual(
       (await request(baseUrl, "/api/products", { headers: authHeaders })).payload,
@@ -532,6 +660,12 @@ test("luồng nhập/xuất theo danh mục, công thức lợi nhuận và rese
       /'delivered'/,
       "schema đơn hàng cũ phải được nâng cấp để hỗ trợ trạng thái đã giao"
     );
+    const salesOrderColumns = database.prepare("PRAGMA table_info(sales_orders)").all()
+      .map((column) => column.name);
+    assert.ok(salesOrderColumns.includes("shipping_fee"));
+    assert.ok(salesOrderColumns.includes("customer_name"));
+    assert.ok(salesOrderColumns.includes("customer_phone"));
+    assert.ok(salesOrderColumns.includes("customer_address"));
     assert.equal(
       database.prepare("SELECT COUNT(*) AS count FROM app_meta WHERE key = ?").get(
         "operational_data_reset_2026_08_03_v2"

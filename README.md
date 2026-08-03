@@ -14,7 +14,7 @@
 - Đơn Giày tự trừ kho bộ hàng đi kèm cố định: Vớ 9.000đ, Xịt khử mùi 10.000đ, Thùng Carton 8.000đ, Băng keo 1.000đ và 1 tờ giấy in 200đ.
 - Giấy in có thể nhập theo sấp; hệ thống tự quy đổi 1 sấp thành 500 tờ và trừ 1 tờ cho mỗi đơn Giày.
 - Mỗi đơn có bốn tab tài chính theo đúng thứ tự DOANH THU → PHÍ SÀN → GIÁ VỐN → LỢI NHUẬN. Ô phí sàn nằm ngay trong tab PHÍ SÀN và tự quy đổi số tiền sang tỷ lệ phần trăm doanh thu.
-- Năm trạng thái đơn gồm Đang chờ lấy, Đang vận chuyển, Hoàn thành, Trả hàng và Hủy đơn. Trả/Hủy hoàn kho đúng một lần và đưa doanh thu đơn về 0.
+- Sáu trạng thái đơn gồm Đang chờ lấy, Đang vận chuyển, Đã giao, Hoàn thành, Trả hàng và Hủy đơn. Hoàn thành/Trả hàng/Hủy đơn là trạng thái kết thúc; Trả/Hủy hoàn kho đúng một lần và đưa doanh thu đơn về 0.
 - Hỗ trợ 6 kênh: Facebook, Zalo, TikTok, Shopee, Website và Lazada.
 - Mỗi sản phẩm chính trong đơn có số lượng và giá bán riêng; sản phẩm đi kèm dùng số lượng, đơn vị và giá vốn cố định, không sửa tại lúc xuất.
 - Một đợt xuất chỉ cập nhật khi toàn bộ đơn hợp lệ; nếu có một dòng sai hoặc không đủ tồn, kho không bị thay đổi.
@@ -32,6 +32,7 @@
 - Đăng nhập bằng số điện thoại và mật khẩu, có kiểm tra định dạng và nút hiện/ẩn mật khẩu.
 - Admin có thể thêm, sửa và xóa tối đa 5 tài khoản quản lý; tên, số điện thoại và mật khẩu là bắt buộc khi tạo mới.
 - Admin có thể tự đổi mật khẩu sau khi xác minh mật khẩu hiện tại; các phiên đăng nhập admin khác sẽ được đăng xuất.
+- Admin có thể xóa toàn bộ sản phẩm, tồn kho, dữ liệu nhập/xuất và lịch sử sau khi nhập lại mật khẩu; tài khoản và danh mục hàng hóa được giữ nguyên.
 - Số điện thoại quản lý phải có đúng 10 số, bắt đầu bằng số 0; mật khẩu tối thiểu 6 ký tự và có ít nhất một ký tự đặc biệt.
 - Quản lý được nhập hàng, xuất hàng, xem tồn kho và báo cáo nhưng không được quản lý tài khoản.
 

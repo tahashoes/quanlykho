@@ -59,6 +59,18 @@ test("luồng nhập/xuất theo danh mục, công thức lợi nhuận và rese
     VALUES
       ('LEGACY-01', 'Dữ liệu cần reset', 3, 100000, 180000,
        '2025-01-01T00:00:00.000Z', '2025-01-01T00:00:00.000Z');
+    CREATE TABLE sales_orders (
+      id INTEGER PRIMARY KEY,
+      order_code TEXT NOT NULL UNIQUE COLLATE NOCASE,
+      sales_channel TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending_pickup'
+        CHECK(status IN ('pending_pickup', 'shipping', 'completed', 'returned', 'cancelled')),
+      platform_fee REAL NOT NULL DEFAULT 0 CHECK(platform_fee >= 0),
+      operator_name TEXT,
+      stock_restored_at TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
   `);
   legacyDatabase.close();
 
@@ -85,6 +97,8 @@ test("luồng nhập/xuất theo danh mục, công thức lợi nhuận và rese
     const page = await (await fetch(baseUrl)).text();
     assert.match(page, /THÊM DANH MỤC MỚI/);
     assert.doesNotMatch(page, /Bổ sung tồn|Nhập thêm hàng/);
+    const appScript = await (await fetch(`${baseUrl}/app.js`)).text();
+    assert.match(appScript, /delivered: "Đã giao"/);
 
     const login = await request(baseUrl, "/api/auth/login", {
       method: "POST",
@@ -289,7 +303,60 @@ test("luồng nhập/xuất theo danh mục, công thức lợi nhuận và rese
     });
     assert.equal(removedReceiptEndpoint.status, 404);
 
-    const returned = await request(baseUrl, `/api/orders/${orders[0].id}/status`, {
+    const shipping = await request(baseUrl, `/api/orders/${orders[0].id}/status`, {
+      method: "PUT",
+      headers: authHeaders,
+      body: JSON.stringify({ status: "shipping" })
+    });
+    assert.equal(shipping.payload.status, "shipping");
+    const delivered = await request(baseUrl, `/api/orders/${orders[0].id}/status`, {
+      method: "PUT",
+      headers: authHeaders,
+      body: JSON.stringify({ status: "delivered" })
+    });
+    assert.equal(delivered.payload.status, "delivered");
+    const completed = await request(baseUrl, `/api/orders/${orders[0].id}/status`, {
+      method: "PUT",
+      headers: authHeaders,
+      body: JSON.stringify({ status: "completed" })
+    });
+    assert.equal(completed.payload.status, "completed");
+    assert.equal(completed.payload.revenue, 420000);
+    assert.equal(completed.payload.cogs, 280200);
+    await assert.rejects(
+      request(baseUrl, `/api/orders/${orders[0].id}/status`, {
+        method: "PUT",
+        headers: authHeaders,
+        body: JSON.stringify({ status: "returned" })
+      }),
+      /Đơn đã ở trạng thái kết thúc/
+    );
+
+    const secondCode = await request(baseUrl, "/api/orders/next-code", {
+      headers: authHeaders
+    });
+    assert.match(secondCode.payload.code, /^TAHA-\d{8}-002$/);
+    await request(baseUrl, "/api/sales", {
+      method: "POST",
+      headers: authHeaders,
+      body: JSON.stringify({
+        channel: "tiktok",
+        orders: [{
+          orderCode: secondCode.payload.code,
+          platformFee: "21,000",
+          items: [{
+            categoryId: categories["Giày"].id,
+            code: "GIAY-TEST-01",
+            quantity: 1,
+            salePrice: "210,000"
+          }]
+        }]
+      })
+    });
+    const secondOrder = (await request(baseUrl, "/api/orders", {
+      headers: authHeaders
+    })).payload.find((order) => order.orderCode === secondCode.payload.code);
+    const returned = await request(baseUrl, `/api/orders/${secondOrder.id}/status`, {
       method: "PUT",
       headers: authHeaders,
       body: JSON.stringify({ status: "returned" })
@@ -300,19 +367,105 @@ test("luồng nhập/xuất theo danh mục, công thức lợi nhuận và rese
     assert.equal(returned.payload.profit, 0);
 
     products = (await request(baseUrl, "/api/products", { headers: authHeaders })).payload;
-    assert.equal(stockOf("GIAY-TEST-01"), 15);
-    assert.equal(stockOf("VO-MD"), 20);
-    assert.equal(stockOf("GIAY-IN-MD"), 500);
+    assert.equal(stockOf("GIAY-TEST-01"), 13);
+    assert.equal(stockOf("VO-MD"), 18);
+    assert.equal(stockOf("GIAY-IN-MD"), 499);
 
-    await request(baseUrl, `/api/orders/${orders[0].id}/status`, {
+    await request(baseUrl, `/api/orders/${secondOrder.id}/status`, {
       method: "PUT",
       headers: authHeaders,
       body: JSON.stringify({ status: "returned" })
     });
     products = (await request(baseUrl, "/api/products", { headers: authHeaders })).payload;
-    assert.equal(stockOf("GIAY-TEST-01"), 15, "không được hoàn kho hai lần");
+    assert.equal(stockOf("GIAY-TEST-01"), 13, "không được hoàn kho hai lần");
+
+    const manager = await request(baseUrl, "/api/managers", {
+      method: "POST",
+      headers: authHeaders,
+      body: JSON.stringify({
+        name: "Quản lý kiểm thử",
+        phone: "0911111111",
+        password: "Manager@1"
+      })
+    });
+    assert.equal(manager.payload.role, "manager");
+    const managerLogin = await request(baseUrl, "/api/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ phone: "0911111111", password: "Manager@1" })
+    });
+    const managerCookie = managerLogin.response.headers.get("set-cookie").split(";")[0];
+    const forbiddenPurge = await fetch(`${baseUrl}/api/admin/operational-data`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json", Cookie: managerCookie },
+      body: JSON.stringify({
+        password: "Manager@1",
+        confirmation: "DELETE_OPERATIONAL_DATA"
+      })
+    });
+    assert.equal(forbiddenPurge.status, 403, "quản lý không được phép xóa dữ liệu");
+
+    await assert.rejects(
+      request(baseUrl, "/api/admin/operational-data", {
+        method: "DELETE",
+        headers: authHeaders,
+        body: JSON.stringify({
+          password: "SaiMatKhau@1",
+          confirmation: "DELETE_OPERATIONAL_DATA"
+        })
+      }),
+      /Mật khẩu admin không đúng/
+    );
+    const purged = await request(baseUrl, "/api/admin/operational-data", {
+      method: "DELETE",
+      headers: authHeaders,
+      body: JSON.stringify({
+        password: "Admin@123",
+        confirmation: "DELETE_OPERATIONAL_DATA"
+      })
+    });
+    assert.equal(purged.payload.deleted.products, 6);
+    assert.equal(purged.payload.deleted.orders, 2);
+    assert.equal(purged.payload.categoriesPreserved, 7);
+    assert.deepEqual(
+      (await request(baseUrl, "/api/products", { headers: authHeaders })).payload,
+      []
+    );
+    assert.deepEqual(
+      (await request(baseUrl, "/api/orders", { headers: authHeaders })).payload,
+      []
+    );
+    assert.deepEqual(
+      (await request(baseUrl, "/api/transactions", { headers: authHeaders })).payload,
+      []
+    );
+    assert.equal(
+      (await request(baseUrl, "/api/categories", { headers: authHeaders })).payload.length,
+      7,
+      "xóa dữ liệu không được xóa danh mục"
+    );
+    assert.equal(
+      (await request(baseUrl, "/api/managers", { headers: authHeaders })).payload.length,
+      1,
+      "xóa dữ liệu không được xóa tài khoản quản lý"
+    );
+    assert.equal(
+      (await request(baseUrl, "/api/auth/me", { headers: authHeaders })).payload.role,
+      "admin",
+      "phiên admin hiện tại phải được giữ lại"
+    );
+    assert.match(
+      (await request(baseUrl, "/api/orders/next-code", { headers: authHeaders })).payload.code,
+      /^TAHA-\d{8}-001$/
+    );
 
     const database = new DatabaseSync(databasePath);
+    assert.match(
+      database.prepare(`
+        SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'sales_orders'
+      `).get().sql,
+      /'delivered'/,
+      "schema đơn hàng cũ phải được nâng cấp để hỗ trợ trạng thái đã giao"
+    );
     assert.equal(
       database.prepare("SELECT COUNT(*) AS count FROM app_meta WHERE key = ?").get(
         "operational_data_reset_2026_08_03_v2"

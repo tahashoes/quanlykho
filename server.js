@@ -18,8 +18,17 @@ const cookieSecure = process.env.COOKIE_SECURE === "true";
 const sessionDays = 7;
 const salesChannels = ["facebook", "zalo", "tiktok", "shopee", "website", "lazada"];
 const productUnits = ["đôi", "cái", "chai", "thùng", "cuộn", "tờ", "sấp"];
-const orderStatuses = ["pending_pickup", "shipping", "completed", "returned", "cancelled"];
-const terminalOrderStatuses = new Set(["returned", "cancelled"]);
+const orderStatuses = [
+  "pending_pickup",
+  "shipping",
+  "delivered",
+  "completed",
+  "returned",
+  "cancelled"
+];
+const lockedOrderStatuses = new Set(["completed", "returned", "cancelled"]);
+const reversedOrderStatuses = new Set(["returned", "cancelled"]);
+const adminDataPurgeConfirmation = "DELETE_OPERATIONAL_DATA";
 const shoeBundleRules = [
   { categoryName: "Vớ", quantity: 1, unit: "đôi", price: 9_000, perOrder: false },
   { categoryName: "Xịt khử mùi", quantity: 1, unit: "chai", price: 10_000, perOrder: false },
@@ -160,7 +169,7 @@ db.exec(`
     order_code TEXT NOT NULL UNIQUE COLLATE NOCASE,
     sales_channel TEXT NOT NULL,
     status TEXT NOT NULL DEFAULT 'pending_pickup'
-      CHECK(status IN ('pending_pickup', 'shipping', 'completed', 'returned', 'cancelled')),
+      CHECK(status IN ('pending_pickup', 'shipping', 'delivered', 'completed', 'returned', 'cancelled')),
     platform_fee REAL NOT NULL DEFAULT 0 CHECK(platform_fee >= 0),
     operator_name TEXT,
     stock_restored_at TEXT,
@@ -184,6 +193,35 @@ ensureColumn("products", "category_id", "INTEGER");
 ensureColumn("products", "size", "TEXT");
 ensureColumn("products", "color", "TEXT");
 ensureColumn("products", "unit", "TEXT NOT NULL DEFAULT 'cái'");
+const salesOrdersTableSql = String(db.prepare(`
+  SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'sales_orders'
+`).get()?.sql || "");
+if (!salesOrdersTableSql.includes("'delivered'")) {
+  db.exec(`
+    BEGIN IMMEDIATE;
+    ALTER TABLE sales_orders RENAME TO sales_orders_before_delivered;
+    CREATE TABLE sales_orders (
+      id INTEGER PRIMARY KEY,
+      order_code TEXT NOT NULL UNIQUE COLLATE NOCASE,
+      sales_channel TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending_pickup'
+        CHECK(status IN ('pending_pickup', 'shipping', 'delivered', 'completed', 'returned', 'cancelled')),
+      platform_fee REAL NOT NULL DEFAULT 0 CHECK(platform_fee >= 0),
+      operator_name TEXT,
+      stock_restored_at TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    INSERT INTO sales_orders
+      (id, order_code, sales_channel, status, platform_fee, operator_name,
+       stock_restored_at, created_at, updated_at)
+    SELECT id, order_code, sales_channel, status, platform_fee, operator_name,
+           stock_restored_at, created_at, updated_at
+    FROM sales_orders_before_delivered;
+    DROP TABLE sales_orders_before_delivered;
+    COMMIT;
+  `);
+}
 const dataResetKey = "operational_data_reset_2026_08_03_v2";
 if (!db.prepare("SELECT key FROM app_meta WHERE key = ?").get(dataResetKey)) {
   db.exec("BEGIN IMMEDIATE");
@@ -1322,7 +1360,7 @@ function orderView(order, itemRows) {
   const addons = items.filter((item) => item.lineRole === "addon");
   const originalRevenue = mainItems.reduce((sum, item) => sum + item.total, 0);
   const originalCogs = items.reduce((sum, item) => sum + item.quantity * item.unitCost, 0);
-  const reversed = terminalOrderStatuses.has(order.status);
+  const reversed = reversedOrderStatuses.has(order.status);
   const revenue = reversed ? 0 : originalRevenue;
   const platformFee = reversed ? 0 : Number(order.platform_fee || 0);
   const cogs = reversed ? 0 : originalCogs;
@@ -1399,14 +1437,14 @@ function updateOrderStatus(id, body) {
   const order = db.prepare("SELECT * FROM sales_orders WHERE id = ?").get(id);
   if (!order) throw new AppError("Không tìm thấy đơn hàng.", 404);
   if (order.status === nextStatus) return listOrders({ id, limit: 1 })[0];
-  if (terminalOrderStatuses.has(order.status)) {
-    throw new AppError("Đơn đã trả hoặc hủy là trạng thái cuối và không thể mở lại.");
+  if (lockedOrderStatuses.has(order.status)) {
+    throw new AppError("Đơn đã ở trạng thái kết thúc và không thể chuyển tiếp.");
   }
 
   const timestamp = now();
   db.exec("BEGIN IMMEDIATE");
   try {
-    if (terminalOrderStatuses.has(nextStatus)) {
+    if (reversedOrderStatuses.has(nextStatus)) {
       const quantities = db.prepare(`
         SELECT product_id, SUM(quantity) AS quantity
         FROM transactions
@@ -1691,6 +1729,50 @@ function changeAdminPassword(body, user, request) {
   return { ok: true, updatedAt: timestamp };
 }
 
+function purgeOperationalData(body, user) {
+  const password = String(body.password ?? "");
+  if (body.confirmation !== adminDataPurgeConfirmation) {
+    throw new AppError("Bạn chưa xác nhận xóa toàn bộ dữ liệu.");
+  }
+  const admin = db.prepare("SELECT * FROM users WHERE id = ? AND role = 'admin'").get(user.id);
+  if (!admin || !verifyPassword(password, admin.password_salt, admin.password_hash)) {
+    throw new AppError("Mật khẩu admin không đúng.");
+  }
+
+  const deleted = {
+    products: Number(db.prepare("SELECT COUNT(*) AS count FROM products").get().count),
+    receipts: Number(db.prepare(`
+      SELECT COUNT(*) AS count FROM transactions WHERE kind = 'IN'
+    `).get().count),
+    exportRows: Number(db.prepare(`
+      SELECT COUNT(*) AS count FROM transactions WHERE kind = 'OUT'
+    `).get().count),
+    orders: Number(db.prepare("SELECT COUNT(*) AS count FROM sales_orders").get().count),
+    stockAdjustments: Number(db.prepare(`
+      SELECT COUNT(*) AS count FROM stock_adjustments
+    `).get().count)
+  };
+
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    db.prepare("DELETE FROM transactions").run();
+    db.prepare("DELETE FROM stock_adjustments").run();
+    db.prepare("DELETE FROM sales_orders").run();
+    db.prepare("DELETE FROM products").run();
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+  return {
+    ok: true,
+    deleted,
+    categoriesPreserved: Number(
+      db.prepare("SELECT COUNT(*) AS count FROM categories").get().count
+    )
+  };
+}
+
 function routeId(pathname, prefix) {
   const match = new RegExp(`^${prefix}/(\\d+)$`).exec(pathname);
   return match ? Number(match[1]) : null;
@@ -1786,6 +1868,10 @@ const server = createServer(async (request, response) => {
         200,
         changeAdminPassword(await readJson(request), user, request)
       );
+    }
+    if (request.method === "DELETE" && url.pathname === "/api/admin/operational-data") {
+      requireAdmin(user);
+      return json(response, 200, purgeOperationalData(await readJson(request), user));
     }
     if (url.pathname === "/api/managers") {
       requireAdmin(user);

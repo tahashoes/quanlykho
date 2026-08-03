@@ -20,7 +20,6 @@ const salesChannels = ["facebook", "zalo", "tiktok", "shopee", "website", "lazad
 const productUnits = ["đôi", "cái", "chai", "thùng", "cuộn", "tờ", "sấp"];
 const orderStatuses = ["pending_pickup", "shipping", "completed", "returned", "cancelled"];
 const terminalOrderStatuses = new Set(["returned", "cancelled"]);
-const saleCategoryNames = new Set(["Giày", "Xịt khử mùi"]);
 const shoeBundleRules = [
   { categoryName: "Vớ", quantity: 1, unit: "đôi", price: 9_000, perOrder: false },
   { categoryName: "Xịt khử mùi", quantity: 1, unit: "chai", price: 10_000, perOrder: false },
@@ -29,13 +28,63 @@ const shoeBundleRules = [
   { categoryName: "Giấy in", quantity: 1, unit: "tờ", price: 200, perOrder: true }
 ];
 const defaultCategories = [
-  { name: "Giày", requiresSize: true, priceNote: "Đã bao gồm VAT 8%" },
-  { name: "Vớ", requiresSize: true, priceNote: "Đã bao gồm VAT 8%" },
-  { name: "Xịt khử mùi", requiresSize: false, priceNote: "Đã bao gồm PVC" },
-  { name: "Thùng Carton", requiresSize: false, priceNote: "Đã bao gồm PVC" },
-  { name: "Băng keo", requiresSize: false, priceNote: "Đã bao gồm PVC" },
-  { name: "Giấy in", requiresSize: false, priceNote: "Đã bao gồm PVC" }
+  {
+    name: "Giày",
+    defaultUnit: "đôi",
+    requiresSize: true,
+    priceNote: "Đã bao gồm VAT 8%",
+    fields: { size: true, color: true, shippingCost: true, salePrice: true, image: true }
+  },
+  {
+    name: "Vớ",
+    defaultUnit: "đôi",
+    requiresSize: false,
+    priceNote: "Giá nhập theo hóa đơn",
+    fields: { size: false, color: true, shippingCost: true, salePrice: false, image: false }
+  },
+  {
+    name: "Xịt khử mùi",
+    defaultUnit: "chai",
+    requiresSize: false,
+    priceNote: "Giá nhập theo hóa đơn",
+    fields: { size: false, color: true, shippingCost: false, salePrice: false, image: false }
+  },
+  {
+    name: "Thùng Carton",
+    defaultUnit: "thùng",
+    requiresSize: false,
+    priceNote: "Giá nhập theo hóa đơn",
+    fields: { size: false, color: true, shippingCost: true, salePrice: false, image: false }
+  },
+  {
+    name: "Băng keo",
+    defaultUnit: "cuộn",
+    requiresSize: false,
+    priceNote: "Giá nhập theo hóa đơn",
+    fields: { size: false, color: true, shippingCost: true, salePrice: false, image: false }
+  },
+  {
+    name: "Giấy in",
+    defaultUnit: "sấp",
+    requiresSize: false,
+    priceNote: "1 sấp = 500 tờ",
+    fields: { size: false, color: false, shippingCost: true, salePrice: false, image: false }
+  }
 ];
+const defaultCategoryProfiles = new Map(
+  defaultCategories.map((category) => [category.name.toLocaleLowerCase("vi"), category])
+);
+const customCategoryProfile = {
+  defaultUnit: "cái",
+  requiresSize: false,
+  priceNote: "Giá nhập theo hóa đơn",
+  fields: { size: false, color: true, shippingCost: true, salePrice: true, image: true }
+};
+
+function getCategoryProfile(name) {
+  return defaultCategoryProfiles.get(String(name || "").toLocaleLowerCase("vi")) ||
+    customCategoryProfile;
+}
 
 mkdirSync(dirname(dataFile), { recursive: true });
 const db = new DatabaseSync(dataFile);
@@ -126,14 +175,39 @@ db.exec(`
     operator_name TEXT,
     created_at TEXT NOT NULL
   );
+  CREATE TABLE IF NOT EXISTS app_meta (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+  );
 `);
 ensureColumn("products", "category_id", "INTEGER");
 ensureColumn("products", "size", "TEXT");
 ensureColumn("products", "color", "TEXT");
 ensureColumn("products", "unit", "TEXT NOT NULL DEFAULT 'cái'");
+const dataResetKey = "operational_data_reset_2026_08_03_v2";
+if (!db.prepare("SELECT key FROM app_meta WHERE key = ?").get(dataResetKey)) {
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    db.prepare("DELETE FROM sessions").run();
+    db.prepare("DELETE FROM transactions").run();
+    db.prepare("DELETE FROM stock_adjustments").run();
+    db.prepare("DELETE FROM sales_orders").run();
+    db.prepare("DELETE FROM products").run();
+    db.prepare("DELETE FROM categories").run();
+    db.prepare("DELETE FROM users WHERE role = 'manager'").run();
+    db.prepare("INSERT INTO app_meta (key, value) VALUES (?, ?)").run(dataResetKey, now());
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+}
 const insertDefaultCategory = db.prepare(`
   INSERT OR IGNORE INTO categories (name, requires_size, price_note, created_at)
   VALUES (?, ?, ?, ?)
+`);
+const updateDefaultCategory = db.prepare(`
+  UPDATE categories SET requires_size = ?, price_note = ? WHERE name = ?
 `);
 for (const category of defaultCategories) {
   insertDefaultCategory.run(
@@ -141,6 +215,11 @@ for (const category of defaultCategories) {
     category.requiresSize ? 1 : 0,
     category.priceNote,
     now()
+  );
+  updateDefaultCategory.run(
+    category.requiresSize ? 1 : 0,
+    category.priceNote,
+    category.name
   );
 }
 db.prepare(`
@@ -353,10 +432,17 @@ function landedCost(product) {
 }
 
 function normalizeStockInput(category, unitValue, quantityValue, costValue, shippingValue = 0) {
-  const unit = cleanUnit(unitValue);
+  const profile = getCategoryProfile(category.name);
+  const unit = cleanUnit(unitValue || profile.defaultUnit);
+  if (defaultCategoryProfiles.has(category.name.toLocaleLowerCase("vi")) &&
+      unit !== profile.defaultUnit) {
+    throw new AppError(`Đơn vị mặc định của ${category.name} là ${profile.defaultUnit}.`);
+  }
   const quantity = positiveInteger(quantityValue, "Số lượng nhập");
   const costPrice = nonNegativeNumber(costValue, "Giá nhập");
-  const shippingCost = nonNegativeNumber(shippingValue || 0, "Phí vận chuyển");
+  const shippingCost = profile.fields.shippingCost
+    ? nonNegativeNumber(shippingValue || 0, "Phí vận chuyển")
+    : 0;
   if (category.name === "Giấy in" && unit === "sấp") {
     return {
       quantity: quantity * 500,
@@ -560,11 +646,15 @@ function logout(request, response) {
 }
 
 function categoryView(category) {
+  const profile = getCategoryProfile(category.name);
   return {
     id: Number(category.id),
     name: category.name,
     requiresSize: Boolean(category.requires_size),
     priceNote: category.price_note,
+    defaultUnit: profile.defaultUnit,
+    isDefault: defaultCategoryProfiles.has(category.name.toLocaleLowerCase("vi")),
+    fields: { ...profile.fields },
     createdAt: category.created_at
   };
 }
@@ -579,10 +669,8 @@ function listCategories() {
 
 function addCategory(body) {
   const name = cleanCategoryName(body.name);
-  const requiresSize = body.requiresSize === true || body.requiresSize === "true" ? 1 : 0;
-  const priceNote = requiresSize
-    ? "Đã bao gồm VAT 8%"
-    : "Đã bao gồm thuế/phí theo hóa đơn";
+  const requiresSize = 0;
+  const priceNote = customCategoryProfile.priceNote;
   try {
     const result = db.prepare(`
       INSERT INTO categories (name, requires_size, price_note, created_at)
@@ -818,114 +906,98 @@ function addProduct(body, user) {
   const categoryId = positiveInteger(body.categoryId, "Danh mục hàng hóa");
   const category = getCategoryById(categoryId);
   if (!category) throw new AppError("Không tìm thấy danh mục hàng hóa.", 404);
-  const name = cleanOptionalText(body.name, "Tên hàng hóa", 160) || code;
-  const size = cleanOptionalText(body.size, "Size", 50);
+  const profile = getCategoryProfile(category.name);
+  const existing = getProductByCode(code);
+  const name = cleanOptionalText(body.name, "Tên hàng hóa", 160) ||
+    existing?.name || `${category.name} ${code}`;
+  const size = profile.fields.size ? cleanOptionalText(body.size, "Size", 50) : null;
   if (category.requires_size && !size) {
     throw new AppError(`Danh mục ${category.name} bắt buộc phải nhập size.`);
   }
-  const color = cleanOptionalText(body.color, "Màu sắc", 80);
+  const color = profile.fields.color ? cleanOptionalText(body.color, "Màu sắc", 80) : null;
   const stockInput = normalizeStockInput(
     category,
-    body.unit,
+    body.unit || profile.defaultUnit,
     body.quantity,
     body.costPrice,
     body.shippingCost
   );
   const { unit, quantity, costPrice, shippingCost } = stockInput;
-  const salePrice = body.salePrice === undefined || body.salePrice === ""
-    ? 0
-    : nonNegativeNumber(body.salePrice, "Giá bán");
-  const image = cleanImage(body.image);
+  const salePrice = profile.fields.salePrice && body.salePrice !== undefined &&
+    body.salePrice !== ""
+    ? nonNegativeNumber(body.salePrice, "Giá bán")
+    : null;
+  const image = profile.fields.image ? cleanImage(body.image) : null;
   const timestamp = now();
   db.exec("BEGIN IMMEDIATE");
   try {
-    if (getProductByCode(code)) {
-      throw new AppError("Mã sản phẩm đã tồn tại. Hãy dùng mục Nhập thêm hàng.");
+    let productId;
+    if (existing) {
+      if (Number(existing.category_id) !== categoryId) {
+        throw new AppError(`Mã ${code} đã thuộc danh mục ${existing.category_name}.`);
+      }
+      if (size && existing.size && size.toLocaleLowerCase("vi") !==
+          existing.size.toLocaleLowerCase("vi")) {
+        throw new AppError(`Mã ${code} đã được dùng cho size ${existing.size}.`);
+      }
+      if (color && existing.color && color.toLocaleLowerCase("vi") !==
+          existing.color.toLocaleLowerCase("vi")) {
+        throw new AppError(`Mã ${code} đã được dùng cho màu ${existing.color}.`);
+      }
+      const newStock = Number(existing.stock) + quantity;
+      const weightedCost = (
+        Number(existing.stock) * Number(existing.cost_price) + quantity * costPrice
+      ) / newStock;
+      const weightedShipping = (
+        Number(existing.stock) * Number(existing.shipping_cost || 0) + quantity * shippingCost
+      ) / newStock;
+      db.prepare(`
+        UPDATE products
+        SET name = ?, stock = ?, cost_price = ?, shipping_cost = ?, sale_price = ?,
+            image_data = ?, size = ?, color = ?, updated_at = ?
+        WHERE id = ?
+      `).run(
+        name,
+        newStock,
+        weightedCost,
+        weightedShipping,
+        salePrice ?? Number(existing.sale_price),
+        image || existing.image_data,
+        existing.size || size,
+        existing.color || color,
+        timestamp,
+        existing.id
+      );
+      productId = Number(existing.id);
+    } else {
+      const result = db.prepare(`
+        INSERT INTO products
+          (code, name, stock, cost_price, shipping_cost, sale_price, image_data, category_id,
+           size, color, unit, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        code,
+        name,
+        quantity,
+        costPrice,
+        shippingCost,
+        salePrice || 0,
+        image,
+        categoryId,
+        size,
+        color,
+        unit,
+        timestamp,
+        timestamp
+      );
+      productId = Number(result.lastInsertRowid);
     }
-    const result = db.prepare(`
-      INSERT INTO products
-        (code, name, stock, cost_price, shipping_cost, sale_price, image_data, category_id,
-         size, color, unit, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      code,
-      name,
-      quantity,
-      costPrice,
-      shippingCost,
-      salePrice,
-      image,
-      categoryId,
-      size,
-      color,
-      unit,
-      timestamp,
-      timestamp
-    );
     db.prepare(`
       INSERT INTO transactions
         (product_id, kind, quantity, unit_price, unit_cost, sales_channel, operator_name, created_at)
       VALUES (?, 'IN', ?, ?, ?, NULL, ?, ?)
     `).run(
-      Number(result.lastInsertRowid),
-      quantity,
-      costPrice,
-      costPrice + shippingCost,
-      user.name,
-      timestamp
-    );
-    db.exec("COMMIT");
-  } catch (error) {
-    db.exec("ROLLBACK");
-    throw error;
-  }
-  return productView(getProductByCode(code));
-}
-
-function receiveStock(body, user) {
-  const code = cleanText(body.code, "Mã sản phẩm").toUpperCase();
-  const product = getProductByCode(code);
-  if (!product) throw new AppError("Không tìm thấy sản phẩm theo mã này.", 404);
-  const category = getCategoryById(product.category_id);
-  const stockInput = normalizeStockInput(
-    category,
-    body.inputUnit || product.unit,
-    body.quantity,
-    body.costPrice,
-    body.shippingCost
-  );
-  const { quantity, costPrice, shippingCost } = stockInput;
-  const salePrice = body.salePrice === undefined || body.salePrice === ""
-    ? undefined
-    : nonNegativeNumber(body.salePrice, "Giá bán");
-  const timestamp = now();
-  const newStock = Number(product.stock) + quantity;
-  const weightedCost = (
-    (Number(product.stock) * Number(product.cost_price)) + (quantity * costPrice)
-  ) / newStock;
-  const weightedShipping = (
-    (Number(product.stock) * Number(product.shipping_cost || 0)) + (quantity * shippingCost)
-  ) / newStock;
-  db.exec("BEGIN IMMEDIATE");
-  try {
-    db.prepare(`
-      UPDATE products
-      SET stock = ?, cost_price = ?, shipping_cost = ?, sale_price = ?, updated_at = ?
-      WHERE id = ?
-    `).run(
-      newStock,
-      weightedCost,
-      weightedShipping,
-      salePrice ?? Number(product.sale_price),
-      timestamp,
-      product.id
-    );
-    db.prepare(`
-      INSERT INTO transactions
-        (product_id, kind, quantity, unit_price, unit_cost, sales_channel, operator_name, created_at)
-      VALUES (?, 'IN', ?, ?, ?, NULL, ?, ?)
-    `).run(
-      product.id,
+      productId,
       quantity,
       costPrice,
       costPrice + shippingCost,
@@ -974,9 +1046,7 @@ function getBundleProduct(categoryName) {
 }
 
 function salesConfigView() {
-  const allowedCategories = listCategories().filter((category) => (
-    saleCategoryNames.has(category.name)
-  ));
+  const allowedCategories = listCategories();
   const addons = shoeBundleRules.map((rule) => {
     const product = getBundleProduct(rule.categoryName);
     return {
@@ -1105,9 +1175,6 @@ function sellStock(body, user) {
           product = getProductByCode(code);
           if (!product) throw new AppError(`Không tìm thấy sản phẩm ${code}.`, 404);
           productCache.set(code, product);
-        }
-        if (!saleCategoryNames.has(product.category_name)) {
-          throw new AppError("Khi xuất hàng chỉ được chọn danh mục Giày hoặc Xịt khử mùi.");
         }
         if (
           rawItem?.categoryId !== undefined &&
@@ -1700,9 +1767,6 @@ const server = createServer(async (request, response) => {
     }
     if (request.method === "POST" && url.pathname === "/api/products") {
       return json(response, 201, addProduct(await readJson(request), user));
-    }
-    if (request.method === "POST" && url.pathname === "/api/receipts") {
-      return json(response, 201, receiveStock(await readJson(request), user));
     }
     if (request.method === "POST" && url.pathname === "/api/sales") {
       return json(response, 201, sellStock(await readJson(request), user));

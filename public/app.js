@@ -38,6 +38,15 @@ const orderStatusLabels = {
   cancelled: "Hủy đơn"
 };
 const terminalOrderStatuses = new Set(["returned", "cancelled"]);
+const productUnitLabels = {
+  "đôi": "Đôi",
+  "cái": "Cái",
+  "chai": "Chai",
+  "thùng": "Thùng",
+  "cuộn": "Cuộn",
+  "tờ": "Tờ",
+  "sấp": "Sấp (500 tờ)"
+};
 
 function localDateValue(date = new Date()) {
   const year = date.getFullYear();
@@ -139,6 +148,12 @@ function categoryOptions(selectedId = "") {
   return `<option value="">Chọn danh mục</option>${state.categories.map((category) => (
     `<option value="${category.id}"${Number(selectedId) === category.id ? " selected" : ""}>${text(category.name)}</option>`
   )).join("")}`;
+}
+
+function unitOptions(selectedUnit = "") {
+  return `<option value="">Chọn đơn vị</option>${Object.entries(productUnitLabels).map(
+    ([unit, label]) => `<option value="${unit}"${selectedUnit === unit ? " selected" : ""}>${label}</option>`
+  ).join("")}`;
 }
 
 function saleCategoryOptions(selectedId = "") {
@@ -371,7 +386,7 @@ function renderOrderHistory() {
         <header class="order-history-card-header"><div><strong>${text(order.orderCode)}</strong><small>${dateTime.format(new Date(order.createdAt))} · ${text(order.operatorName || "Dữ liệu cũ")}</small></div><div><span class="channel-chip">${text(channelLabels[order.channel] || "Chưa xác định")}</span><span class="order-status-badge status-${order.status}">${text(orderStatusLabels[order.status])}</span></div></header>
         <div class="order-main-products"><span class="order-section-label">Sản phẩm chính</span>${mainProducts}</div>
         ${addons}
-        <div class="order-finance-tabs"><span><small>Doanh thu</small><strong>${money.format(order.revenue)}</strong></span><span><small>Phí sàn</small><strong>${money.format(order.platformFee)}</strong><em>${Number(order.platformFeePercent).toLocaleString("vi-VN", { maximumFractionDigits: 2 })}%</em></span><span><small>Giá vốn</small><strong>${money.format(order.cogs)}</strong></span><span class="profit"><small>Lợi nhuận</small><strong>${money.format(order.profit)}</strong></span></div>
+        <div class="order-finance-tabs"><span><small>DOANH THU</small><strong>${money.format(order.revenue)}</strong></span><span><small>PHÍ SÀN</small><strong>${money.format(order.platformFee)}</strong><em>${Number(order.platformFeePercent).toLocaleString("vi-VN", { maximumFractionDigits: 2 })}%</em></span><span><small>GIÁ VỐN</small><strong>${money.format(order.cogs)}</strong></span><span class="profit"><small>LỢI NHUẬN</small><strong>${money.format(order.profit)}</strong></span></div>
         <div class="order-status-actions"><span>Chuyển trạng thái</span><div>${statusActions}</div></div>
       </article>`;
     }).join("")
@@ -427,19 +442,10 @@ function renderManagers() {
 }
 
 function renderCategories() {
-  $("#category-count").textContent = `${state.categories.length} danh mục`;
-  $("#category-list").innerHTML = state.categories.map((category) => (
-    `<span class="category-chip category-chip-large">${text(category.name)}${category.requiresSize ? "<small>Có size</small>" : ""}</span>`
-  )).join("");
-
   const newProductSelect = $("#new-product-form").elements.categoryId;
-  const receiveSelect = $("#receive-form").elements.categoryId;
   const selectedNewProductCategory = newProductSelect.value;
-  const selectedReceiveCategory = receiveSelect.value;
   newProductSelect.innerHTML = categoryOptions(selectedNewProductCategory);
-  receiveSelect.innerHTML = categoryOptions(selectedReceiveCategory);
   updateNewProductCategoryRules();
-  updateReceiveProductOptions();
 }
 
 function findProduct(code) {
@@ -451,58 +457,36 @@ function findProduct(code) {
 function updateNewProductCategoryRules() {
   const form = $("#new-product-form");
   const category = categoryById(form.elements.categoryId.value);
-  const sizeField = $("#new-product-size-field");
-  const sizeInput = form.elements.size;
-  const requiresSize = Boolean(category?.requiresSize);
-  sizeField.classList.toggle("hidden", !requiresSize);
-  sizeInput.required = requiresSize;
-  if (!requiresSize) sizeInput.value = "";
+  const fields = category?.fields || {};
+  const fieldElements = {
+    size: $("#new-product-size-field"),
+    color: $("#new-product-color-field"),
+    shippingCost: $("#new-product-shipping-field"),
+    salePrice: $("#new-product-sale-price-field"),
+    image: $("#new-product-image-field")
+  };
+  Object.entries(fieldElements).forEach(([field, wrapper]) => {
+    const visible = Boolean(fields[field]);
+    const input = wrapper.querySelector("input");
+    wrapper.classList.toggle("hidden", !visible);
+    input.disabled = !visible;
+    if (!visible) {
+      if (field === "shippingCost") input.value = "0";
+      else input.value = "";
+    }
+  });
+  form.elements.size.required = Boolean(category?.requiresSize);
+  const unitSelect = form.elements.unit;
+  unitSelect.disabled = !category;
+  if (!category) {
+    unitSelect.innerHTML = `<option value="">Chọn danh mục trước</option>`;
+  } else if (category.isDefault) {
+    unitSelect.innerHTML = `<option value="${text(category.defaultUnit)}">${text(productUnitLabels[category.defaultUnit] || category.defaultUnit)}</option>`;
+  } else {
+    unitSelect.innerHTML = unitOptions(category.defaultUnit);
+  }
+  if (!fields.image) clearProductImage();
   $("#new-product-price-note").textContent = category ? `(${category.priceNote})` : "";
-}
-
-function updateReceiveProductOptions() {
-  const form = $("#receive-form");
-  const categoryId = Number(form.elements.categoryId.value);
-  const codeSelect = form.elements.code;
-  const previousCode = codeSelect.value;
-  const products = state.products.filter((product) => product.categoryId === categoryId);
-  codeSelect.disabled = !categoryId;
-  codeSelect.innerHTML = !categoryId
-    ? `<option value="">Chọn danh mục trước</option>`
-    : `<option value="">Chọn mã sản phẩm</option>${products.map((product) => (
-      `<option value="${text(product.code)}"${product.code === previousCode ? " selected" : ""}>${text(productOptionLabel(product))}</option>`
-    )).join("")}`;
-  const category = categoryById(categoryId);
-  $("#receive-price-note").textContent = category ? `(${category.priceNote})` : "";
-  fillProductFields(form);
-}
-
-function fillProductFields(form) {
-  const product = findProduct(form.elements.code.value);
-  form.elements.name.value = product ? product.name : "";
-  if (product && form.elements.salePrice && !form.elements.salePrice.value) {
-    form.elements.salePrice.value = formatMoneyInputValue(product.salePrice);
-  }
-  if (form.elements.inputUnit) {
-    form.elements.inputUnit.disabled = !product;
-    form.elements.inputUnit.innerHTML = !product
-      ? `<option value="">Chọn mã sản phẩm trước</option>`
-      : product.categoryName === "Giấy in"
-        ? `<option value="tờ">Tờ</option><option value="sấp">Sấp (500 tờ)</option>`
-        : `<option value="${text(product.unit)}">${text(product.unit)}</option>`;
-  }
-  const preview = $("#receive-product-preview");
-  if (!preview) return;
-  if (!product) {
-    preview.classList.add("hidden");
-    preview.innerHTML = "";
-    return;
-  }
-  const visual = product.image
-    ? `<img src="${product.image}" alt="" />`
-    : `<span class="product-placeholder">${text(product.name.slice(0, 1).toUpperCase())}</span>`;
-  preview.innerHTML = `<span class="selected-product-visual">${visual}</span><span><strong>${text(product.name)}</strong><small>${text(product.categoryName)} · ${text(variantLabel(product))} · tồn ${product.stock.toLocaleString("vi-VN")} ${text(product.unit)}</small></span>`;
-  preview.classList.remove("hidden");
 }
 
 function generateSaleOrderCode() {
@@ -528,6 +512,11 @@ function saleItemTemplate() {
       <div class="sale-line-total"><span>Thành tiền dự kiến</span><strong data-sale-total>${money.format(0)}</strong></div>
       <button class="sale-remove-button" type="button" data-sale-action="remove-item" aria-label="Xóa sản phẩm" title="Xóa sản phẩm">×</button>
     </div>
+    <div class="sale-linked-fields hidden" data-sale-linked-fields>
+      <span class="hidden" data-sale-linked="size"><small>SIZE</small><strong>—</strong></span>
+      <span class="hidden" data-sale-linked="color"><small>MÀU SẮC</small><strong>—</strong></span>
+      <span data-sale-linked="unit"><small>ĐƠN VỊ</small><strong>—</strong></span>
+    </div>
     <div class="sale-addon-preview hidden" data-sale-addons></div>
   </div>`;
 }
@@ -542,8 +531,12 @@ function saleOrderTemplate(orderCode = generateSaleOrderCode()) {
     <div class="sale-order-items">${saleItemTemplate()}</div>
     <button class="sale-add-item" type="button" data-sale-action="add-item">+ Thêm sản phẩm</button>
     <div class="sale-order-summary">
-      <div class="sale-draft-finances"><span><small>Doanh thu</small><strong data-draft-revenue>${money.format(0)}</strong></span><span><small>Phí sàn</small><strong data-draft-fee>${money.format(0)}</strong></span><span><small>Giá vốn</small><strong data-draft-cogs>${money.format(0)}</strong></span><span><small>Lợi nhuận</small><strong data-draft-profit>${money.format(0)}</strong></span></div>
-      <label class="sale-platform-fee">Phí sàn theo ${"kênh đã chọn"}<input data-sale-field="platformFee" inputmode="numeric" data-money-input value="0" /><small data-sale-fee-percent>0% doanh thu</small></label>
+      <div class="sale-draft-finances">
+        <span><small>DOANH THU</small><strong data-draft-revenue>${money.format(0)}</strong></span>
+        <label class="sale-finance-fee"><small>PHÍ SÀN · <b data-sale-fee-channel>KÊNH ĐÃ CHỌN</b></small><input aria-label="Phí sàn" data-sale-field="platformFee" inputmode="numeric" data-money-input value="0" /><em data-sale-fee-percent>0% doanh thu</em></label>
+        <span><small>GIÁ VỐN</small><strong data-draft-cogs>${money.format(0)}</strong></span>
+        <span class="profit"><small>LỢI NHUẬN</small><strong data-draft-profit>${money.format(0)}</strong></span>
+      </div>
     </div>
   </section>`;
 }
@@ -589,7 +582,6 @@ function updateOrderFinancials(order) {
   const fee = Math.max(0, parseMoney(feeInput.value) || 0);
   const profit = revenue - fee - cogs;
   order.querySelector("[data-draft-revenue]").textContent = money.format(revenue);
-  order.querySelector("[data-draft-fee]").textContent = money.format(fee);
   order.querySelector("[data-draft-cogs]").textContent = money.format(cogs);
   order.querySelector("[data-draft-profit]").textContent = money.format(profit);
   order.querySelector("[data-sale-fee-percent]").textContent = `${revenue > 0 ? (fee * 100 / revenue).toLocaleString("vi-VN", { maximumFractionDigits: 2 }) : "0"}% doanh thu`;
@@ -603,7 +595,7 @@ function updateSaleBuilderSummary() {
   $("#sale-form [data-sale-action='add-order']").disabled = !channelReady;
   orders.forEach((order, index) => {
     order.querySelector("[data-sale-order-number]").textContent = `Đơn hàng ${index + 1}`;
-    order.querySelector(".sale-platform-fee").childNodes[0].textContent = `Phí sàn ${channelName}`;
+    order.querySelector("[data-sale-fee-channel]").textContent = channelName.toUpperCase();
     order.querySelector("[data-sale-field='orderCode']").disabled = !channelReady;
     order.querySelector("[data-sale-field='platformFee']").disabled = !channelReady;
     order.querySelector("[data-sale-action='generate-order']").disabled = !channelReady;
@@ -633,14 +625,26 @@ function updateSaleItem(item, prefillPrice = false) {
   const product = findProduct(codeInput.value);
   const preview = item.querySelector("[data-sale-preview]");
   const addonPreview = item.querySelector("[data-sale-addons]");
+  const linkedFields = item.querySelector("[data-sale-linked-fields]");
   if (product) {
     if (prefillPrice) priceInput.value = formatMoneyInputValue(product.salePrice);
     const visual = product.image ? `<img src="${product.image}" alt="" />` : `<span class="sale-preview-placeholder">${text(product.name.slice(0, 1).toUpperCase())}</span>`;
     preview.innerHTML = `${visual}<span><strong>${text(product.name)}</strong><small>${text(product.code)} · ${variantHtml(product)} · còn ${product.stock.toLocaleString("vi-VN")} ${text(product.unit)}</small></span>`;
     preview.classList.add("found");
+    const category = categoryById(product.categoryId);
+    const sizeField = linkedFields.querySelector("[data-sale-linked='size']");
+    const colorField = linkedFields.querySelector("[data-sale-linked='color']");
+    sizeField.classList.toggle("hidden", !category?.fields?.size);
+    colorField.classList.toggle("hidden", !category?.fields?.color);
+    sizeField.querySelector("strong").textContent = product.size || "—";
+    colorField.querySelector("strong").textContent = product.color || "—";
+    linkedFields.querySelector("[data-sale-linked='unit'] strong").textContent =
+      product.unit === "tờ" && product.categoryName === "Giấy in" ? "Tờ (1/500 sấp)" : product.unit;
+    linkedFields.classList.remove("hidden");
   } else {
     preview.innerHTML = `<span class="sale-preview-placeholder">?</span><span><strong>Chưa chọn sản phẩm</strong><small>Chọn danh mục rồi chọn mã hàng</small></span>`;
     preview.classList.remove("found");
+    linkedFields.classList.add("hidden");
   }
   const quantity = Math.max(0, Number(quantityInput.value) || 0);
   const price = Math.max(0, parseMoney(priceInput.value) || 0);
@@ -685,7 +689,7 @@ function collectSalesPayload() {
     const items = [...order.querySelectorAll("[data-sale-item]")].map((item, itemIndex) => {
       const categoryId = Number(item.querySelector("[data-sale-field='categoryId']").value);
       const category = state.salesConfig.allowedCategories.find((entry) => entry.id === categoryId);
-      if (!category) throw new Error(`Vui lòng chọn Giày hoặc Xịt khử mùi ở dòng ${itemIndex + 1}.`);
+      if (!category) throw new Error(`Vui lòng chọn danh mục ở dòng ${itemIndex + 1}.`);
       const code = item.querySelector("[data-sale-field='code']").value.trim().toUpperCase();
       const product = findProduct(code);
       if (!product) throw new Error(`Không tìm thấy sản phẩm ở dòng ${itemIndex + 1} của đơn ${orderCode}.`);
@@ -963,7 +967,7 @@ newProductForm.addEventListener("submit", async (event) => {
   const saved = await submitForm(
     newProductForm,
     "/api/products",
-    "Đã thêm hàng hóa vào kho.",
+    "Đã nhập hàng và cập nhật tồn kho.",
     "POST",
     { image: state.productImage }
   );
@@ -985,23 +989,19 @@ $("#product-image-input").addEventListener("change", async (event) => {
 $("#remove-image").addEventListener("click", clearProductImage);
 
 const categoryForm = $("#category-form");
+function updateCategorySubmitState() {
+  categoryForm.querySelector("button[type='submit']").disabled =
+    !categoryForm.elements.name.value.trim();
+}
+categoryForm.elements.name.addEventListener("input", updateCategorySubmitState);
 categoryForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   await submitForm(
     categoryForm,
     "/api/categories",
-    "Đã thêm danh mục hàng hóa mới.",
-    "POST",
-    { requiresSize: categoryForm.elements.requiresSize.checked }
+    "Đã thêm danh mục hàng hóa mới."
   );
-});
-
-const receiveForm = $("#receive-form");
-receiveForm.elements.categoryId.addEventListener("change", updateReceiveProductOptions);
-receiveForm.elements.code.addEventListener("change", () => fillProductFields(receiveForm));
-receiveForm.addEventListener("submit", (event) => {
-  event.preventDefault();
-  submitForm(receiveForm, "/api/receipts", "Đã nhập thêm hàng và cập nhật tồn kho.");
+  updateCategorySubmitState();
 });
 
 const saleForm = $("#sale-form");

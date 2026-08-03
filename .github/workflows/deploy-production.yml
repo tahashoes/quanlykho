@@ -1,0 +1,164 @@
+name: Deploy production
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: quanlykho-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Backup and deploy VPS
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      VPS_HOST: ${{ secrets.VPS_HOST }}
+      VPS_PORT: ${{ secrets.VPS_PORT }}
+      VPS_USER: ${{ secrets.VPS_USER }}
+      VPS_PROJECT_PATH: ${{ secrets.VPS_PROJECT_PATH }}
+      VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+
+    steps:
+      - name: Validate deployment target
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$VPS_HOST" = "14.225.254.65"
+          test "$VPS_PORT" = "22"
+          test "$VPS_USER" = "root"
+          test "$VPS_PROJECT_PATH" = "/opt/quanlykho"
+          test -n "$VPS_SSH_KEY"
+
+      - name: Configure SSH
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh_dir="$RUNNER_TEMP/quanlykho-ssh"
+          install -d -m 700 "$ssh_dir"
+          printf '%s\n' "$VPS_SSH_KEY" > "$ssh_dir/id_ed25519"
+          chmod 600 "$ssh_dir/id_ed25519"
+          ssh-keyscan -T 15 -p "$VPS_PORT" -H "$VPS_HOST" > "$ssh_dir/known_hosts"
+          test -s "$ssh_dir/known_hosts"
+          chmod 600 "$ssh_dir/known_hosts"
+
+      - name: Deploy with database backup and rollback
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh_dir="$RUNNER_TEMP/quanlykho-ssh"
+          ssh \
+            -i "$ssh_dir/id_ed25519" \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$ssh_dir/known_hosts" \
+            -p "$VPS_PORT" \
+            "$VPS_USER@$VPS_HOST" \
+            "bash -s -- '$VPS_PROJECT_PATH' '$GITHUB_SHA'" <<'REMOTE_SCRIPT'
+          set -euo pipefail
+
+          project_path="$1"
+          target_sha="$2"
+          repository_url="https://github.com/tahashoes/quanlykho.git"
+          compose_file="compose.production.yaml"
+          service_name="quanlykho"
+          database_path="data/quanlykho.db"
+
+          test "$project_path" = "/opt/quanlykho"
+          cd "$project_path"
+          test -d .git
+          test -f "$compose_file"
+          test -f .env
+
+          if test -n "$(git status --porcelain --untracked-files=no)"; then
+            echo "Tracked files on the VPS have local changes; deployment stopped."
+            git status --short
+            exit 1
+          fi
+
+          previous_sha="$(git rev-parse HEAD)"
+          git fetch --no-tags "$repository_url" agent/inventory-management-app
+          fetched_sha="$(git rev-parse FETCH_HEAD)"
+          if test "$fetched_sha" != "$target_sha"; then
+            echo "Fetched SHA $fetched_sha does not match workflow SHA $target_sha."
+            exit 1
+          fi
+
+          git switch --detach "$target_sha"
+          docker compose -f "$compose_file" config --quiet
+          docker compose -f "$compose_file" build
+
+          backup_stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+          backup_dir="$project_path/backups/$backup_stamp"
+          mkdir -p "$backup_dir"
+
+          docker compose -f "$compose_file" stop "$service_name"
+          database_backed_up=0
+          if test -f "$database_path"; then
+            if ! cp -a "$database_path" "$backup_dir/quanlykho.db"; then
+              docker compose -f "$compose_file" start "$service_name"
+              exit 1
+            fi
+            for sidecar_path in "$database_path-wal" "$database_path-shm"; do
+              if test -f "$sidecar_path"; then
+                cp -a "$sidecar_path" "$backup_dir/"
+              fi
+            done
+            database_backed_up=1
+            echo "BACKUP_DIR=$backup_dir"
+          fi
+
+          rollback_deployment() {
+            set +e
+            echo "Deployment failed; restoring commit $previous_sha and database backup."
+            docker compose -f "$compose_file" stop "$service_name"
+            if test "$database_backed_up" = "1"; then
+              rm -f "$database_path-wal" "$database_path-shm"
+              cp -a "$backup_dir/quanlykho.db" "$database_path"
+              for backup_sidecar in "$backup_dir/quanlykho.db-wal" "$backup_dir/quanlykho.db-shm"; do
+                if test -f "$backup_sidecar"; then
+                  cp -a "$backup_sidecar" data/
+                fi
+              done
+            fi
+            git switch --detach "$previous_sha"
+            docker compose -f "$compose_file" build
+            docker compose -f "$compose_file" up -d
+            docker compose -f "$compose_file" ps
+            exit 1
+          }
+
+          if ! docker compose -f "$compose_file" up -d; then
+            rollback_deployment
+          fi
+
+          health_status=""
+          for attempt in $(seq 1 60); do
+            health_status="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$service_name" 2>/dev/null || true)"
+            if test "$health_status" = "healthy"; then
+              break
+            fi
+            sleep 2
+          done
+
+          if test "$health_status" != "healthy"; then
+            docker compose -f "$compose_file" logs --tail=120 "$service_name"
+            rollback_deployment
+          fi
+
+          docker compose -f "$compose_file" ps
+          echo "DEPLOYED_SHA=$(git rev-parse HEAD)"
+          REMOTE_SCRIPT
+
+      - name: Verify public HTTPS
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error \
+            --retry 12 \
+            --retry-delay 5 \
+            --retry-all-errors \
+            https://tahashoes.one/ > /dev/null

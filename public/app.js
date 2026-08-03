@@ -30,6 +30,14 @@ const channelLabels = {
   lazada: "Lazada",
   unknown: "Chưa xác định"
 };
+const orderStatusLabels = {
+  pending_pickup: "Đang chờ lấy",
+  shipping: "Đang vận chuyển",
+  completed: "Hoàn thành",
+  returned: "Trả hàng",
+  cancelled: "Hủy đơn"
+};
+const terminalOrderStatuses = new Set(["returned", "cancelled"]);
 
 function localDateValue(date = new Date()) {
   const year = date.getFullYear();
@@ -43,15 +51,20 @@ const state = {
   categories: [],
   products: [],
   transactions: [],
+  orders: [],
+  salesConfig: { allowedCategories: [], addons: [] },
+  nextOrderCode: null,
   dashboard: null,
   report: null,
   managers: [],
   reportPeriod: "day",
   reportAnchor: localDateValue(),
   productImage: null,
-  editingManagerId: null
+  editingManagerId: null,
+  editingStockProductId: null,
+  orderStatusFilter: "pending_pickup"
 };
-let saleOrderSequence = 0;
+let saleOrderSequence = 1;
 
 async function api(url, options = {}) {
   const response = await fetch(url, {
@@ -100,6 +113,23 @@ function variantLabel(product) {
   ].filter(Boolean).join(" · ") || "—";
 }
 
+function variantHtml(product) {
+  const values = [];
+  if (product.size) values.push(`Size ${text(product.size)}`);
+  if (product.color) values.push(`<span class="variant-color">Màu ${text(product.color)}</span>`);
+  return values.join(" · ") || "—";
+}
+
+function parseMoney(value) {
+  const cleaned = String(value ?? "").replaceAll(",", "").replace(/\s/g, "");
+  return cleaned === "" ? 0 : Number(cleaned);
+}
+
+function formatMoneyInputValue(value) {
+  const digits = String(value ?? "").replace(/\D/g, "").replace(/^0+(?=\d)/, "");
+  return digits ? digits.replace(/\B(?=(\d{3})+(?!\d))/g, ",") : "";
+}
+
 function productOptionLabel(product) {
   const variant = variantLabel(product);
   return `${product.code}${variant === "—" ? "" : ` · ${variant}`} · còn ${product.stock} ${product.unit}`;
@@ -107,6 +137,12 @@ function productOptionLabel(product) {
 
 function categoryOptions(selectedId = "") {
   return `<option value="">Chọn danh mục</option>${state.categories.map((category) => (
+    `<option value="${category.id}"${Number(selectedId) === category.id ? " selected" : ""}>${text(category.name)}</option>`
+  )).join("")}`;
+}
+
+function saleCategoryOptions(selectedId = "") {
+  return `<option value="">Chọn danh mục</option>${state.salesConfig.allowedCategories.map((category) => (
     `<option value="${category.id}"${Number(selectedId) === category.id ? " selected" : ""}>${text(category.name)}</option>`
   )).join("")}`;
 }
@@ -213,8 +249,8 @@ function renderDashboard() {
   const report = state.dashboard;
   if (!report) return;
   $("#dashboard-metrics").innerHTML = [
-    metric("Doanh thu", money.format(report.revenue), "Từ toàn bộ hàng đã xuất", true),
-    metric("Lợi nhuận", money.format(report.profit), "Doanh thu trừ giá vốn bán hàng"),
+    metric("Doanh thu", money.format(report.revenue), "Chỉ tính sản phẩm chính", true),
+    metric("Lợi nhuận", money.format(report.profit), `Đã trừ ${money.format(report.platformFees)} phí sàn`),
     metric("Giá trị tồn kho", money.format(report.inventoryValue), `${report.totalUnits} đơn vị trong kho`),
     metric("Sản phẩm", report.skuCount.toLocaleString("vi-VN"), `${report.lowStockCount} sản phẩm sắp hết`)
   ].join("");
@@ -257,11 +293,12 @@ function renderDashboard() {
     ? lowProducts.map((product) => `<div class="compact-row"><span class="row-icon">!</span><div class="row-copy"><strong>${text(product.name)}</strong><small>${text(product.code)}</small></div><div class="row-value">${product.stock}<small>còn lại</small></div></div>`).join("")
     : `<p class="empty">Kho hàng đang ở mức an toàn.</p>`;
 
-  $("#recent-transactions").innerHTML = report.recent.length
-    ? report.recent.map((item) => {
+  const visibleRecent = report.recent.filter((item) => item.lineRole !== "addon");
+  $("#recent-transactions").innerHTML = visibleRecent.length
+    ? visibleRecent.map((item) => {
       const details = item.kind === "IN"
         ? "Nhập hàng"
-        : `Xuất hàng · ${item.orderCode || "Chưa có mã đơn"} · ${channelLabels[item.channel] || "Chưa xác định"}`;
+        : `Xuất hàng · ${item.orderCode || "Chưa có mã đơn"} · ${orderStatusLabels[item.orderStatus] || channelLabels[item.channel] || "Chưa xác định"}`;
       return `<div class="compact-row"><span class="row-icon ${item.kind === "OUT" ? "out" : ""}">${item.kind === "IN" ? "+" : "−"}</span><div class="row-copy"><strong>${text(item.name)}</strong><small>${details} · ${dateTime.format(new Date(item.createdAt))}</small></div><div class="row-value">${item.kind === "IN" ? "+" : "−"}${item.quantity}<small>${money.format(item.total ?? item.quantity * item.unitPrice)}</small></div></div>`;
     }).join("")
     : `<p class="empty">Chưa có giao dịch nào.</p>`;
@@ -274,7 +311,7 @@ function renderProductOptions() {
   document.querySelectorAll("[data-sale-item]").forEach((item) => {
     const categorySelect = item.querySelector("[data-sale-field='categoryId']");
     const selectedCategory = categorySelect.value;
-    categorySelect.innerHTML = categoryOptions(selectedCategory);
+    categorySelect.innerHTML = saleCategoryOptions(selectedCategory);
     updateSaleProductOptions(item);
     updateSaleItem(item);
   });
@@ -287,22 +324,58 @@ function renderProducts(products = state.products) {
       const visual = product.image
         ? `<img class="product-thumb" src="${product.image}" alt="" />`
         : `<span class="product-placeholder">${text(product.name.slice(0, 1).toUpperCase())}</span>`;
-      return `<tr><td><div class="product-cell">${visual}<span class="product-name">${text(product.name)}</span></div></td><td><span class="category-chip">${text(product.categoryName)}</span></td><td>${text(product.code)}</td><td>${text(variantLabel(product))}</td><td><span class="stock${product.stock <= 5 ? " low" : ""}">${product.stock}</span></td><td>${text(product.unit)}</td><td>${money.format(product.costPrice)}</td><td>${product.salePrice ? money.format(product.salePrice) : "—"}</td><td>${money.format(product.inventoryValue)}</td><td class="muted">${dateTime.format(new Date(product.updatedAt))}</td></tr>`;
+      const editingStock = state.editingStockProductId === product.id;
+      const stockCell = editingStock
+        ? `<span class="stock-edit"><input data-stock-value type="number" min="0" step="1" value="${product.stock}" /><button class="mini-button primary" data-stock-action="save" data-id="${product.id}">Lưu</button><button class="mini-button" data-stock-action="cancel">Hủy</button></span>`
+        : `<span class="stock${product.stock <= 5 ? " low" : ""}">${product.stock.toLocaleString("vi-VN")}</span>`;
+      return `<tr><td><div class="product-cell">${visual}<span class="product-name">${text(product.name)}</span></div></td><td><span class="category-chip">${text(product.categoryName)}</span></td><td class="product-code">${text(product.code)}</td><td>${variantHtml(product)}</td><td>${stockCell}</td><td>${text(product.unit)}</td><td>${money.format(product.costPrice)}</td><td>${money.format(product.shippingCost)}</td><td class="product-name">${money.format(product.landedCost)}</td><td>${product.salePrice ? money.format(product.salePrice) : "—"}</td><td>${money.format(product.inventoryValue)}</td><td><button class="mini-button" data-stock-action="edit" data-id="${product.id}">Sửa tồn</button></td></tr>`;
     }).join("")
-    : `<tr><td colspan="10" class="empty">Chưa tìm thấy sản phẩm.</td></tr>`;
+    : `<tr><td colspan="12" class="empty">Chưa tìm thấy sản phẩm.</td></tr>`;
 }
 
 function renderHistories() {
   const receiptRows = state.transactions.filter((item) => item.kind === "IN");
-  const saleRows = state.transactions.filter((item) => item.kind === "OUT");
 
   $("#receipt-history-table").innerHTML = receiptRows.length
-    ? receiptRows.map((item) => `<tr><td class="muted">${dateTime.format(new Date(item.createdAt))}</td><td><span class="operator-name">${text(item.operatorName || "Dữ liệu cũ")}</span></td><td><span class="category-chip">${text(item.categoryName)}</span></td><td>${text(item.code)}</td><td>${text(variantLabel(item))}</td><td>${item.quantity.toLocaleString("vi-VN")}</td><td>${text(item.unit)}</td><td>${money.format(item.unitPrice)}</td><td>${money.format(item.quantity * item.unitPrice)}</td></tr>`).join("")
-    : `<tr><td colspan="9" class="empty">Chưa có lịch sử nhập hàng.</td></tr>`;
+    ? receiptRows.map((item) => {
+      const shipping = Math.max(0, item.unitCost - item.unitPrice);
+      return `<tr><td class="muted">${dateTime.format(new Date(item.createdAt))}</td><td><span class="operator-name">${text(item.operatorName || "Dữ liệu cũ")}</span></td><td><span class="category-chip">${text(item.categoryName)}</span></td><td class="product-code">${text(item.code)}</td><td>${variantHtml(item)}</td><td>${item.quantity.toLocaleString("vi-VN")}</td><td>${text(item.unit)}</td><td>${money.format(item.unitPrice)}</td><td>${money.format(shipping)}</td><td>${money.format(item.quantity * item.unitCost)}</td></tr>`;
+    }).join("")
+    : `<tr><td colspan="10" class="empty">Chưa có lịch sử nhập hàng.</td></tr>`;
+  renderOrderHistory();
+}
 
-  $("#sale-history-table").innerHTML = saleRows.length
-    ? saleRows.map((item) => `<tr><td class="muted">${dateTime.format(new Date(item.createdAt))}</td><td><span class="operator-name">${text(item.operatorName || "Dữ liệu cũ")}</span></td><td class="product-name">${text(item.orderCode || "—")}</td><td><span class="channel-chip">${text(channelLabels[item.channel] || "Chưa xác định")}</span></td><td><span class="category-chip">${text(item.categoryName)}</span></td><td>${text(item.code)}</td><td>${text(variantLabel(item))}</td><td>${item.quantity.toLocaleString("vi-VN")}</td><td>${text(item.unit)}</td><td>${money.format(item.unitPrice)}</td><td>${text(discountLabel(item))}</td><td>${money.format(item.total ?? item.quantity * item.unitPrice)}</td></tr>`).join("")
-    : `<tr><td colspan="12" class="empty">Chưa có lịch sử xuất hàng.</td></tr>`;
+function renderOrderHistory() {
+  const statuses = Object.keys(orderStatusLabels);
+  $("#order-status-tabs").innerHTML = statuses.map((status) => {
+    const count = state.orders.filter((order) => order.status === status).length;
+    return `<button class="order-status-tab${state.orderStatusFilter === status ? " active" : ""}" data-order-filter="${status}">${text(orderStatusLabels[status])}<small>${count}</small></button>`;
+  }).join("");
+
+  const orders = state.orders.filter((order) => order.status === state.orderStatusFilter);
+  $("#sale-order-history").innerHTML = orders.length
+    ? orders.map((order) => {
+      const mainProducts = order.items.map((item) => (
+        `<div class="order-main-product"><span><strong>${text(item.name)}</strong><small>${text(item.code)} · ${variantHtml(item)}</small></span><span class="order-product-quantity">${item.quantity.toLocaleString("vi-VN")} ${text(item.unit)}</span><strong>${money.format(item.unitPrice)}</strong></div>`
+      )).join("");
+      const addons = order.addons.length
+        ? `<div class="order-addon-box"><span class="order-addon-title">Sản phẩm đi kèm</span><div>${order.addons.map((item) => (
+          `<span class="order-addon-item"><strong>${text(item.name)}</strong><small>${item.quantity.toLocaleString("vi-VN")} ${text(item.unit)} · ${money.format(item.unitPrice)}</small></span>`
+        )).join("")}</div></div>`
+        : "";
+      const terminal = terminalOrderStatuses.has(order.status);
+      const statusActions = Object.entries(orderStatusLabels).map(([status, label]) => (
+        `<button class="order-status-action${order.status === status ? " active" : ""}${status === "returned" || status === "cancelled" ? " danger" : ""}" data-order-status-action="${status}" data-id="${order.id}"${terminal || order.status === status ? " disabled" : ""}>${text(label)}</button>`
+      )).join("");
+      return `<article class="order-history-card">
+        <header class="order-history-card-header"><div><strong>${text(order.orderCode)}</strong><small>${dateTime.format(new Date(order.createdAt))} · ${text(order.operatorName || "Dữ liệu cũ")}</small></div><div><span class="channel-chip">${text(channelLabels[order.channel] || "Chưa xác định")}</span><span class="order-status-badge status-${order.status}">${text(orderStatusLabels[order.status])}</span></div></header>
+        <div class="order-main-products"><span class="order-section-label">Sản phẩm chính</span>${mainProducts}</div>
+        ${addons}
+        <div class="order-finance-tabs"><span><small>Doanh thu</small><strong>${money.format(order.revenue)}</strong></span><span><small>Phí sàn</small><strong>${money.format(order.platformFee)}</strong><em>${Number(order.platformFeePercent).toLocaleString("vi-VN", { maximumFractionDigits: 2 })}%</em></span><span><small>Giá vốn</small><strong>${money.format(order.cogs)}</strong></span><span class="profit"><small>Lợi nhuận</small><strong>${money.format(order.profit)}</strong></span></div>
+        <div class="order-status-actions"><span>Chuyển trạng thái</span><div>${statusActions}</div></div>
+      </article>`;
+    }).join("")
+    : `<p class="empty order-empty">Chưa có đơn ở trạng thái ${text(orderStatusLabels[state.orderStatusFilter].toLowerCase())}.</p>`;
 }
 
 function renderReport() {
@@ -312,10 +385,10 @@ function renderReport() {
     ? `Báo cáo ngày ${shortDate.format(new Date(`${report.range.startDate}T00:00:00`))}`
     : `Từ ${shortDate.format(new Date(`${report.range.startDate}T00:00:00`))} đến ${shortDate.format(new Date(`${report.range.endDate}T00:00:00`))}`;
   $("#report-metrics").innerHTML = [
-    metric("Doanh thu", money.format(report.totals.revenue), "Tổng tất cả kênh", true),
-    metric("Lợi nhuận", money.format(report.totals.profit), "Doanh thu trừ giá vốn"),
-    metric("Số đơn hàng", report.totals.orders.toLocaleString("vi-VN"), "Đếm theo mã đơn hàng"),
-    metric("Sản phẩm bán ra", report.totals.units.toLocaleString("vi-VN"), "Tổng số lượng trong các đơn")
+    metric("Doanh thu", money.format(report.totals.revenue), "Tổng sản phẩm chính", true),
+    metric("Phí sàn", money.format(report.totals.platformFees), `${report.totals.orders.toLocaleString("vi-VN")} đơn hàng`),
+    metric("Giá vốn", money.format(report.totals.cogs), `${report.totals.units.toLocaleString("vi-VN")} sản phẩm chính`),
+    metric("Lợi nhuận", money.format(report.totals.profit), "Doanh thu − phí sàn − giá vốn")
   ].join("");
   const channelRanking = report.channels.filter((item) => item.channel !== "unknown").sort(
     (left, right) => right.orders - left.orders || right.units - left.units
@@ -336,11 +409,14 @@ function renderReport() {
     emptyMessage: "Chưa có sản phẩm bán ra trong khoảng thời gian này.",
     ariaLabel: "Biểu đồ cột sản phẩm bán nhiều nhất trong kỳ báo cáo"
   });
-  const channelRows = report.channels.map((item) => `<tr><td><span class="channel-chip">${text(channelLabels[item.channel] || item.channel)}</span></td><td>${item.orders.toLocaleString("vi-VN")}</td><td>${item.units.toLocaleString("vi-VN")}</td><td>${money.format(item.revenue)}</td><td>${money.format(item.profit)}</td></tr>`).join("");
-  $("#channel-table").innerHTML = `${channelRows}<tr class="channel-total"><td>TỔNG TẤT CẢ KÊNH</td><td>${report.totals.orders.toLocaleString("vi-VN")}</td><td>${report.totals.units.toLocaleString("vi-VN")}</td><td>${money.format(report.totals.revenue)}</td><td>${money.format(report.totals.profit)}</td></tr>`;
-  $("#transaction-table").innerHTML = report.transactions.length
-    ? report.transactions.map((item) => `<tr><td class="muted">${dateTime.format(new Date(item.createdAt))}</td><td class="product-name">${text(item.orderCode || "—")}</td><td><span class="channel-chip">${text(channelLabels[item.channel] || "Chưa xác định")}</span></td><td><span class="category-chip">${text(item.categoryName)}</span></td><td>${text(item.code)}</td><td>${text(variantLabel(item))}</td><td>${item.quantity}</td><td>${text(item.unit)}</td><td>${money.format(item.unitPrice)}</td><td>${text(discountLabel(item))}</td><td>${money.format(item.total ?? item.quantity * item.unitPrice)}</td></tr>`).join("")
-    : `<tr><td colspan="11" class="empty">Không có đơn hàng trong khoảng thời gian này.</td></tr>`;
+  const channelRows = report.channels.map((item) => `<tr><td><span class="channel-chip">${text(channelLabels[item.channel] || item.channel)}</span></td><td>${item.orders.toLocaleString("vi-VN")}</td><td>${item.units.toLocaleString("vi-VN")}</td><td>${money.format(item.revenue)}</td><td>${money.format(item.platformFees)}</td><td>${money.format(item.cogs)}</td><td>${money.format(item.profit)}</td></tr>`).join("");
+  $("#channel-table").innerHTML = `${channelRows}<tr class="channel-total"><td>TỔNG TẤT CẢ KÊNH</td><td>${report.totals.orders.toLocaleString("vi-VN")}</td><td>${report.totals.units.toLocaleString("vi-VN")}</td><td>${money.format(report.totals.revenue)}</td><td>${money.format(report.totals.platformFees)}</td><td>${money.format(report.totals.cogs)}</td><td>${money.format(report.totals.profit)}</td></tr>`;
+  $("#transaction-table").innerHTML = report.orders.length
+    ? report.orders.map((order) => {
+      const products = order.items.map((item) => `${item.name} × ${item.quantity}`).join(", ");
+      return `<tr><td class="muted">${dateTime.format(new Date(order.createdAt))}</td><td class="product-name">${text(order.orderCode)}</td><td><span class="channel-chip">${text(channelLabels[order.channel] || "Chưa xác định")}</span></td><td><span class="order-status-badge status-${order.status}">${text(orderStatusLabels[order.status])}</span></td><td title="${text(products)}">${text(products)}</td><td>${money.format(order.revenue)}</td><td>${money.format(order.platformFee)}</td><td>${money.format(order.cogs)}</td><td>${money.format(order.profit)}</td></tr>`;
+    }).join("")
+    : `<tr><td colspan="9" class="empty">Không có đơn hàng trong khoảng thời gian này.</td></tr>`;
 }
 
 function renderManagers() {
@@ -405,7 +481,15 @@ function fillProductFields(form) {
   const product = findProduct(form.elements.code.value);
   form.elements.name.value = product ? product.name : "";
   if (product && form.elements.salePrice && !form.elements.salePrice.value) {
-    form.elements.salePrice.value = product.salePrice;
+    form.elements.salePrice.value = formatMoneyInputValue(product.salePrice);
+  }
+  if (form.elements.inputUnit) {
+    form.elements.inputUnit.disabled = !product;
+    form.elements.inputUnit.innerHTML = !product
+      ? `<option value="">Chọn mã sản phẩm trước</option>`
+      : product.categoryName === "Giấy in"
+        ? `<option value="tờ">Tờ</option><option value="sấp">Sấp (500 tờ)</option>`
+        : `<option value="${text(product.unit)}">${text(product.unit)}</option>`;
   }
   const preview = $("#receive-product-preview");
   if (!preview) return;
@@ -422,64 +506,45 @@ function fillProductFields(form) {
 }
 
 function generateSaleOrderCode() {
-  const date = new Date();
-  const datePart = localDateValue(date).replaceAll("-", "");
-  const timePart = [date.getHours(), date.getMinutes(), date.getSeconds()]
-    .map((value) => String(value).padStart(2, "0"))
-    .join("");
-  saleOrderSequence = (saleOrderSequence + 1) % 100;
-  return `DH-${datePart}-${timePart}${String(saleOrderSequence).padStart(2, "0")}`;
+  const now = new Date();
+  const date = state.nextOrderCode?.date || [
+    String(now.getDate()).padStart(2, "0"),
+    String(now.getMonth() + 1).padStart(2, "0"),
+    now.getFullYear()
+  ].join("");
+  const code = `TAHA-${date}-${String(saleOrderSequence).padStart(3, "0")}`;
+  saleOrderSequence += 1;
+  return code;
 }
 
 function saleItemTemplate() {
   return `<div class="sale-item-row" data-sale-item>
     <div class="sale-item-main">
-      <label>Danh mục <span class="required-star">*</span>
-        <select data-sale-field="categoryId">${categoryOptions()}</select>
-      </label>
-      <label class="sale-product-code">Mã sản phẩm <span class="required-star">*</span>
-        <select data-sale-field="code" disabled><option value="">Chọn danh mục trước</option></select>
-      </label>
-      <div class="sale-product-preview" data-sale-preview>
-        <span class="sale-preview-placeholder">?</span>
-        <span><strong>Chưa chọn sản phẩm</strong><small>Chọn danh mục rồi chọn mã hàng</small></span>
-      </div>
-      <label>Số lượng <span class="required-star">*</span>
-        <input data-sale-field="quantity" type="number" min="1" step="1" value="1" />
-      </label>
-      <label>Giá bán / SP <span class="required-star">*</span>
-        <input data-sale-field="salePrice" type="number" min="0" step="1000" placeholder="0" />
-      </label>
-      <label>Loại giảm giá
-        <select data-sale-field="discountType">
-          <option value="">Không giảm</option>
-          <option value="percent">Phần trăm (%)</option>
-          <option value="amount">Số tiền / SP</option>
-        </select>
-      </label>
-      <label>Giá trị giảm
-        <input data-sale-field="discountValue" type="number" min="0" step="1000" value="0" disabled />
-      </label>
-      <div class="sale-line-total"><span>Thành tiền</span><strong data-sale-total>${money.format(0)}</strong></div>
+      <label><span class="sale-field-title">Danh mục <b>*</b></span><select data-sale-field="categoryId">${saleCategoryOptions()}</select></label>
+      <label class="sale-product-code"><span class="sale-field-title">Mã sản phẩm <b>*</b></span><select data-sale-field="code" disabled><option value="">Chọn danh mục trước</option></select></label>
+      <div class="sale-product-preview" data-sale-preview><span class="sale-preview-placeholder">?</span><span><strong>Chưa chọn sản phẩm</strong><small>Chọn danh mục rồi chọn mã hàng</small></span></div>
+      <label><span class="sale-field-title">Số lượng <b>*</b></span><input data-sale-field="quantity" type="number" min="1" step="1" value="1" /></label>
+      <label><span class="sale-field-title">Giá bán <b>*</b></span><input data-sale-field="salePrice" inputmode="numeric" data-money-input placeholder="0" /></label>
+      <div class="sale-line-total"><span>Thành tiền dự kiến</span><strong data-sale-total>${money.format(0)}</strong></div>
       <button class="sale-remove-button" type="button" data-sale-action="remove-item" aria-label="Xóa sản phẩm" title="Xóa sản phẩm">×</button>
     </div>
+    <div class="sale-addon-preview hidden" data-sale-addons></div>
   </div>`;
 }
 
 function saleOrderTemplate(orderCode = generateSaleOrderCode()) {
   return `<section class="sale-order-card" data-sale-order>
     <div class="sale-order-header">
-      <div class="sale-order-title"><span class="sale-order-number" data-sale-order-number>Đơn hàng</span><small>Mỗi mã đơn có thể chứa nhiều sản phẩm</small></div>
-      <label class="sale-order-code">Mã đơn hàng <span class="required-star">*</span>
-        <span class="input-with-action">
-          <input data-sale-field="orderCode" value="${text(orderCode)}" maxlength="64" placeholder="VD: DH-001" />
-          <button type="button" class="inline-button" data-sale-action="generate-order">Tạo mã</button>
-        </span>
-      </label>
+      <div class="sale-order-title"><span class="sale-order-number" data-sale-order-number>Đơn hàng</span><small>Nhiều sản phẩm chính trong cùng một mã đơn</small></div>
+      <label class="sale-order-code">Mã đơn hàng <span class="required-star">*</span><span class="input-with-action"><input class="uppercase-input" data-sale-field="orderCode" value="${text(orderCode)}" maxlength="64" /><button type="button" class="inline-button" data-sale-action="generate-order">Tạo mã</button></span></label>
       <button class="sale-remove-order" type="button" data-sale-action="remove-order">Xóa đơn</button>
     </div>
     <div class="sale-order-items">${saleItemTemplate()}</div>
-    <button class="sale-add-item" type="button" data-sale-action="add-item">+ Thêm sản phẩm vào đơn</button>
+    <button class="sale-add-item" type="button" data-sale-action="add-item">+ Thêm sản phẩm</button>
+    <div class="sale-order-summary">
+      <div class="sale-draft-finances"><span><small>Doanh thu</small><strong data-draft-revenue>${money.format(0)}</strong></span><span><small>Phí sàn</small><strong data-draft-fee>${money.format(0)}</strong></span><span><small>Giá vốn</small><strong data-draft-cogs>${money.format(0)}</strong></span><span><small>Lợi nhuận</small><strong data-draft-profit>${money.format(0)}</strong></span></div>
+      <label class="sale-platform-fee">Phí sàn theo ${"kênh đã chọn"}<input data-sale-field="platformFee" inputmode="numeric" data-money-input value="0" /><small data-sale-fee-percent>0% doanh thu</small></label>
+    </div>
   </section>`;
 }
 
@@ -487,7 +552,11 @@ function updateSaleProductOptions(item) {
   const categoryId = Number(item.querySelector("[data-sale-field='categoryId']").value);
   const codeSelect = item.querySelector("[data-sale-field='code']");
   const previousCode = codeSelect.value;
-  const products = state.products.filter((product) => product.categoryId === categoryId);
+  const products = state.products.filter((product) => (
+    product.categoryId === categoryId && state.salesConfig.allowedCategories.some((category) => (
+      category.id === product.categoryId
+    ))
+  ));
   codeSelect.innerHTML = !categoryId
     ? `<option value="">Chọn danh mục trước</option>`
     : `<option value="">Chọn mã sản phẩm</option>${products.map((product) => (
@@ -496,80 +565,98 @@ function updateSaleProductOptions(item) {
   codeSelect.disabled = !categoryId || !$("#sale-form").elements.channel.value;
 }
 
+function updateOrderFinancials(order) {
+  let revenue = 0;
+  let cogs = 0;
+  let shoeUnits = 0;
+  order.querySelectorAll("[data-sale-item]").forEach((item) => {
+    const product = findProduct(item.querySelector("[data-sale-field='code']").value);
+    const quantity = Math.max(0, Number(item.querySelector("[data-sale-field='quantity']").value) || 0);
+    const price = Math.max(0, parseMoney(item.querySelector("[data-sale-field='salePrice']").value) || 0);
+    revenue += quantity * price;
+    if (product) {
+      cogs += quantity * product.landedCost;
+      if (product.categoryName === "Giày") shoeUnits += quantity;
+    }
+  });
+  if (shoeUnits > 0) {
+    for (const addon of state.salesConfig.addons) {
+      const quantity = addon.perOrder ? addon.quantity : addon.quantity * shoeUnits;
+      cogs += quantity * addon.price;
+    }
+  }
+  const feeInput = order.querySelector("[data-sale-field='platformFee']");
+  const fee = Math.max(0, parseMoney(feeInput.value) || 0);
+  const profit = revenue - fee - cogs;
+  order.querySelector("[data-draft-revenue]").textContent = money.format(revenue);
+  order.querySelector("[data-draft-fee]").textContent = money.format(fee);
+  order.querySelector("[data-draft-cogs]").textContent = money.format(cogs);
+  order.querySelector("[data-draft-profit]").textContent = money.format(profit);
+  order.querySelector("[data-sale-fee-percent]").textContent = `${revenue > 0 ? (fee * 100 / revenue).toLocaleString("vi-VN", { maximumFractionDigits: 2 }) : "0"}% doanh thu`;
+}
+
 function updateSaleBuilderSummary() {
   const orders = [...document.querySelectorAll("[data-sale-order]")];
   const channelReady = Boolean($("#sale-form").elements.channel.value);
+  const channelName = channelLabels[$("#sale-form").elements.channel.value] || "kênh đã chọn";
   $("#sale-orders").classList.toggle("locked", !channelReady);
   $("#sale-form [data-sale-action='add-order']").disabled = !channelReady;
   orders.forEach((order, index) => {
     order.querySelector("[data-sale-order-number]").textContent = `Đơn hàng ${index + 1}`;
+    order.querySelector(".sale-platform-fee").childNodes[0].textContent = `Phí sàn ${channelName}`;
     order.querySelector("[data-sale-field='orderCode']").disabled = !channelReady;
+    order.querySelector("[data-sale-field='platformFee']").disabled = !channelReady;
     order.querySelector("[data-sale-action='generate-order']").disabled = !channelReady;
     order.querySelector("[data-sale-action='add-item']").disabled = !channelReady;
-    order.querySelector("[data-sale-action='remove-order']").disabled =
-      !channelReady || orders.length === 1;
+    order.querySelector("[data-sale-action='remove-order']").disabled = !channelReady || orders.length === 1;
     const items = [...order.querySelectorAll("[data-sale-item]")];
     items.forEach((item) => {
       const categoryReady = Boolean(item.querySelector("[data-sale-field='categoryId']").value);
       const productReady = Boolean(item.querySelector("[data-sale-field='code']").value);
       item.querySelectorAll("input, select").forEach((field) => {
-        const isDiscountValue = field.dataset.saleField === "discountValue";
         const isProductCode = field.dataset.saleField === "code";
         const isCategory = field.dataset.saleField === "categoryId";
-        const discountType = item.querySelector("[data-sale-field='discountType']").value;
-        field.disabled = !channelReady ||
-          (isProductCode && !categoryReady) ||
-          (!isCategory && !isProductCode && !productReady) ||
-          (isDiscountValue && !discountType);
+        field.disabled = !channelReady || (isProductCode && !categoryReady) || (!isCategory && !isProductCode && !productReady);
       });
-      item.querySelector("[data-sale-action='remove-item']").disabled =
-        !channelReady || items.length === 1;
+      item.querySelector("[data-sale-action='remove-item']").disabled = !channelReady || items.length === 1;
     });
+    updateOrderFinancials(order);
   });
   const itemCount = document.querySelectorAll("[data-sale-item]").length;
-  $("#sale-batch-summary").textContent =
-    `${orders.length} đơn hàng · ${itemCount} dòng sản phẩm`;
+  $("#sale-batch-summary").textContent = `${orders.length} đơn hàng · ${itemCount} sản phẩm chính`;
 }
 
 function updateSaleItem(item, prefillPrice = false) {
   const codeInput = item.querySelector("[data-sale-field='code']");
   const priceInput = item.querySelector("[data-sale-field='salePrice']");
   const quantityInput = item.querySelector("[data-sale-field='quantity']");
-  const discountTypeInput = item.querySelector("[data-sale-field='discountType']");
-  const discountValueInput = item.querySelector("[data-sale-field='discountValue']");
   const product = findProduct(codeInput.value);
   const preview = item.querySelector("[data-sale-preview]");
-
+  const addonPreview = item.querySelector("[data-sale-addons]");
   if (product) {
-    if (prefillPrice) priceInput.value = product.salePrice;
-    const visual = product.image
-      ? `<img src="${product.image}" alt="" />`
-      : `<span class="sale-preview-placeholder">${text(product.name.slice(0, 1).toUpperCase())}</span>`;
-    preview.innerHTML = `${visual}<span><strong>${text(product.name)}</strong><small>${text(product.code)} · ${text(variantLabel(product))} · còn ${product.stock.toLocaleString("vi-VN")} ${text(product.unit)}</small></span>`;
+    if (prefillPrice) priceInput.value = formatMoneyInputValue(product.salePrice);
+    const visual = product.image ? `<img src="${product.image}" alt="" />` : `<span class="sale-preview-placeholder">${text(product.name.slice(0, 1).toUpperCase())}</span>`;
+    preview.innerHTML = `${visual}<span><strong>${text(product.name)}</strong><small>${text(product.code)} · ${variantHtml(product)} · còn ${product.stock.toLocaleString("vi-VN")} ${text(product.unit)}</small></span>`;
     preview.classList.add("found");
   } else {
     preview.innerHTML = `<span class="sale-preview-placeholder">?</span><span><strong>Chưa chọn sản phẩm</strong><small>Chọn danh mục rồi chọn mã hàng</small></span>`;
     preview.classList.remove("found");
   }
-
-  const hasDiscount = Boolean(discountTypeInput.value);
-  discountValueInput.disabled = !hasDiscount;
-  if (!hasDiscount) discountValueInput.value = 0;
-  discountValueInput.step = discountTypeInput.value === "percent" ? "0.01" : "1000";
-  discountValueInput.max = discountTypeInput.value === "percent"
-    ? "100"
-    : String(Math.max(0, Number(priceInput.value) || 0));
-
   const quantity = Math.max(0, Number(quantityInput.value) || 0);
-  const price = Math.max(0, Number(priceInput.value) || 0);
-  const discountValue = Math.max(0, Number(discountValueInput.value) || 0);
-  const gross = quantity * price;
-  const discount = discountTypeInput.value === "percent"
-    ? gross * Math.min(100, discountValue) / 100
-    : discountTypeInput.value === "amount"
-      ? quantity * Math.min(price, discountValue)
-      : 0;
-  item.querySelector("[data-sale-total]").textContent = money.format(Math.max(0, gross - discount));
+  const price = Math.max(0, parseMoney(priceInput.value) || 0);
+  item.querySelector("[data-sale-total]").textContent = money.format(quantity * price);
+  if (product?.categoryName === "Giày") {
+    addonPreview.innerHTML = `<span>Sản phẩm đi kèm mặc định</span><div>${state.salesConfig.addons.map((addon) => {
+      const addonQuantity = addon.perOrder ? addon.quantity : addon.quantity * quantity;
+      return `<span class="sale-addon-chip${addon.product ? "" : " missing"}"><strong>${text(addon.categoryName)}</strong><small>${addon.perOrder ? "1 tờ / đơn" : `${addonQuantity} ${text(addon.unit)}`} · ${money.format(addon.price)}${addon.product ? ` · ${text(addon.product.code)}` : " · chưa có tồn"}</small></span>`;
+    }).join("")}</div>`;
+    addonPreview.classList.remove("hidden");
+  } else {
+    addonPreview.innerHTML = "";
+    addonPreview.classList.add("hidden");
+  }
+  const order = item.closest("[data-sale-order]");
+  if (order) updateOrderFinancials(order);
 }
 
 function resetSaleBuilder() {
@@ -585,80 +672,46 @@ function collectSalesPayload() {
   const form = $("#sale-form");
   const channel = form.elements.channel.value;
   if (!channel) throw new Error("Vui lòng chọn kênh bán hàng trước.");
-
   const seenOrderCodes = new Set();
   const stockNeeded = new Map();
   const orders = [...form.querySelectorAll("[data-sale-order]")].map((order, orderIndex) => {
-    const orderCodeInput = order.querySelector("[data-sale-field='orderCode']");
-    const orderCode = orderCodeInput.value.trim().toUpperCase();
+    const orderCode = order.querySelector("[data-sale-field='orderCode']").value.trim().toUpperCase();
     if (!orderCode) throw new Error(`Vui lòng nhập mã cho đơn hàng ${orderIndex + 1}.`);
-    if (!/^[A-Z0-9._/-]+$/.test(orderCode) || orderCode.length > 64) {
-      throw new Error(`Mã đơn ${orderCode} không đúng định dạng.`);
-    }
-    if (seenOrderCodes.has(orderCode)) {
-      throw new Error(`Mã đơn ${orderCode} đang bị nhập trùng.`);
-    }
+    if (!/^[A-Z0-9._/-]+$/.test(orderCode) || orderCode.length > 64) throw new Error(`Mã đơn ${orderCode} không đúng định dạng.`);
+    if (seenOrderCodes.has(orderCode)) throw new Error(`Mã đơn ${orderCode} đang bị nhập trùng.`);
     seenOrderCodes.add(orderCode);
-
     const seenProductCodes = new Set();
+    let shoeUnits = 0;
     const items = [...order.querySelectorAll("[data-sale-item]")].map((item, itemIndex) => {
       const categoryId = Number(item.querySelector("[data-sale-field='categoryId']").value);
-      const category = categoryById(categoryId);
-      if (!category) {
-        throw new Error(`Vui lòng chọn danh mục ở dòng ${itemIndex + 1} của đơn ${orderCode}.`);
-      }
+      const category = state.salesConfig.allowedCategories.find((entry) => entry.id === categoryId);
+      if (!category) throw new Error(`Vui lòng chọn Giày hoặc Xịt khử mùi ở dòng ${itemIndex + 1}.`);
       const code = item.querySelector("[data-sale-field='code']").value.trim().toUpperCase();
       const product = findProduct(code);
-      if (!product) {
-        throw new Error(`Không tìm thấy sản phẩm ở dòng ${itemIndex + 1} của đơn ${orderCode}.`);
-      }
-      if (seenProductCodes.has(product.code)) {
-        throw new Error(`Sản phẩm ${product.code} bị lặp trong đơn ${orderCode}.`);
-      }
-      if (product.categoryId !== categoryId) {
-        throw new Error(`Sản phẩm ${product.code} không thuộc danh mục ${category.name}.`);
-      }
+      if (!product) throw new Error(`Không tìm thấy sản phẩm ở dòng ${itemIndex + 1} của đơn ${orderCode}.`);
+      if (seenProductCodes.has(product.code)) throw new Error(`Sản phẩm ${product.code} bị lặp trong đơn ${orderCode}.`);
+      if (product.categoryId !== categoryId) throw new Error(`Sản phẩm ${product.code} không thuộc danh mục ${category.name}.`);
       seenProductCodes.add(product.code);
-
       const quantity = Number(item.querySelector("[data-sale-field='quantity']").value);
-      const salePrice = Number(item.querySelector("[data-sale-field='salePrice']").value);
-      const discountType = item.querySelector("[data-sale-field='discountType']").value || null;
-      const discountValue = discountType
-        ? Number(item.querySelector("[data-sale-field='discountValue']").value)
-        : 0;
-      if (!Number.isInteger(quantity) || quantity <= 0) {
-        throw new Error(`Số lượng của ${product.code} phải là số nguyên lớn hơn 0.`);
-      }
-      if (!Number.isFinite(salePrice) || salePrice < 0) {
-        throw new Error(`Giá bán của ${product.code} không hợp lệ.`);
-      }
-      if (!Number.isFinite(discountValue) || discountValue < 0) {
-        throw new Error(`Giá trị giảm của ${product.code} không hợp lệ.`);
-      }
-      if (discountType === "percent" && discountValue > 100) {
-        throw new Error(`Giảm giá của ${product.code} không được vượt quá 100%.`);
-      }
-      if (discountType === "amount" && discountValue > salePrice) {
-        throw new Error(`Tiền giảm mỗi sản phẩm ${product.code} không được lớn hơn giá bán.`);
-      }
+      const salePrice = parseMoney(item.querySelector("[data-sale-field='salePrice']").value);
+      if (!Number.isInteger(quantity) || quantity <= 0) throw new Error(`Số lượng của ${product.code} phải là số nguyên lớn hơn 0.`);
+      if (!Number.isFinite(salePrice) || salePrice < 0) throw new Error(`Giá bán của ${product.code} không hợp lệ.`);
       stockNeeded.set(product.code, (stockNeeded.get(product.code) || 0) + quantity);
-      return {
-        categoryId,
-        code: product.code,
-        quantity,
-        salePrice,
-        discountType,
-        discountValue
-      };
+      if (product.categoryName === "Giày") shoeUnits += quantity;
+      return { categoryId, code: product.code, quantity, salePrice };
     });
-    return { orderCode, items };
+    if (shoeUnits > 0) {
+      for (const addon of state.salesConfig.addons) {
+        if (!addon.product) throw new Error(`Chưa có tồn kho sản phẩm đi kèm ${addon.categoryName}.`);
+        const quantity = addon.perOrder ? addon.quantity : addon.quantity * shoeUnits;
+        stockNeeded.set(addon.product.code, (stockNeeded.get(addon.product.code) || 0) + quantity);
+      }
+    }
+    return { orderCode, platformFee: parseMoney(order.querySelector("[data-sale-field='platformFee']").value), items };
   });
-
   for (const [code, quantity] of stockNeeded) {
     const product = findProduct(code);
-    if (quantity > product.stock) {
-      throw new Error(`Sản phẩm ${code} cần ${quantity}, nhưng trong kho chỉ còn ${product.stock}.`);
-    }
+    if (!product || quantity > product.stock) throw new Error(`Sản phẩm ${code} cần ${quantity}, nhưng trong kho chỉ còn ${product?.stock || 0}.`);
   }
   return { channel, orders };
 }
@@ -674,15 +727,23 @@ async function refreshCore() {
     api("/api/dashboard"),
     api("/api/categories"),
     api("/api/products"),
-    api("/api/transactions")
+    api("/api/transactions"),
+    api("/api/orders"),
+    api("/api/sales/config"),
+    api("/api/orders/next-code")
   ];
   if (state.currentUser?.role === "admin") requests.push(api("/api/managers"));
-  const [dashboard, categories, products, transactions, managers = []] = await Promise.all(requests);
+  const [dashboard, categories, products, transactions, orders, salesConfig, nextOrderCode, managers = []] = await Promise.all(requests);
   state.dashboard = dashboard;
   state.categories = categories;
   state.products = products;
   state.transactions = transactions;
+  state.orders = orders;
+  state.salesConfig = salesConfig;
+  state.nextOrderCode = nextOrderCode;
+  saleOrderSequence = nextOrderCode.sequence;
   state.managers = managers;
+  if (!$("#sale-form").elements.channel.value) resetSaleBuilder();
   renderDashboard();
   renderCategories();
   renderProductOptions();
@@ -836,6 +897,15 @@ document.querySelectorAll("[data-toggle-password]").forEach((button) => {
   });
 });
 
+document.addEventListener("input", (event) => {
+  if (event.target.matches("[data-money-input]")) {
+    event.target.value = formatMoneyInputValue(event.target.value);
+  }
+  if (event.target.matches(".uppercase-input")) {
+    event.target.value = event.target.value.toUpperCase();
+  }
+});
+
 $("#login-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   const form = event.currentTarget;
@@ -957,11 +1027,16 @@ saleForm.addEventListener("click", (event) => {
 });
 saleForm.addEventListener("input", (event) => {
   const item = event.target.closest("[data-sale-item]");
-  if (!item) return;
-  updateSaleItem(item, event.target.dataset.saleField === "code");
+  if (item) {
+    updateSaleItem(item, event.target.dataset.saleField === "code");
+  } else {
+    const order = event.target.closest("[data-sale-order]");
+    if (order) updateOrderFinancials(order);
+  }
 });
 saleForm.addEventListener("change", (event) => {
   if (event.target.name === "channel") {
+    saleForm.querySelectorAll("[data-sale-item]").forEach((item) => updateSaleProductOptions(item));
     updateSaleBuilderSummary();
     return;
   }
@@ -999,10 +1074,11 @@ saleForm.addEventListener("submit", async (event) => {
       method: "POST",
       body: JSON.stringify(payload)
     });
-    resetSaleBuilder();
+    state.orderStatusFilter = "pending_pickup";
     await refreshAll();
+    resetSaleBuilder();
     toast(
-      `Đã xuất ${result.ordersCreated} đơn với ${result.itemsCreated} dòng sản phẩm.`
+      `Đã tạo ${result.ordersCreated} đơn với ${result.mainItemsCreated} sản phẩm chính.`
     );
   } catch (error) {
     errorElement.textContent = error.message;
@@ -1011,6 +1087,82 @@ saleForm.addEventListener("submit", async (event) => {
   } finally {
     button.disabled = false;
     button.textContent = "Xác nhận xuất tất cả";
+  }
+});
+
+$("#order-status-tabs").addEventListener("click", (event) => {
+  const button = event.target.closest("[data-order-filter]");
+  if (!button) return;
+  state.orderStatusFilter = button.dataset.orderFilter;
+  renderOrderHistory();
+});
+
+$("#sale-order-history").addEventListener("click", async (event) => {
+  const button = event.target.closest("[data-order-status-action]");
+  if (!button || button.disabled) return;
+  const status = button.dataset.orderStatusAction;
+  const id = Number(button.dataset.id);
+  if (terminalOrderStatuses.has(status)) {
+    const confirmed = window.confirm(
+      status === "returned"
+        ? "Xác nhận trả hàng? Toàn bộ sản phẩm sẽ được cộng lại vào tồn kho và doanh thu đơn sẽ về 0."
+        : "Xác nhận hủy đơn? Toàn bộ sản phẩm sẽ được cộng lại vào tồn kho và doanh thu đơn sẽ về 0."
+    );
+    if (!confirmed) return;
+  }
+  button.disabled = true;
+  try {
+    await api(`/api/orders/${id}/status`, {
+      method: "PUT",
+      body: JSON.stringify({ status })
+    });
+    state.orderStatusFilter = status;
+    await refreshAll();
+    toast(terminalOrderStatuses.has(status)
+      ? "Đã hoàn toàn bộ sản phẩm về kho và cập nhật doanh thu."
+      : `Đã chuyển đơn sang ${orderStatusLabels[status].toLowerCase()}.`);
+  } catch (error) {
+    toast(error.message, "error");
+    button.disabled = false;
+  }
+});
+
+$("#product-table").addEventListener("click", async (event) => {
+  const button = event.target.closest("[data-stock-action]");
+  if (!button) return;
+  const action = button.dataset.stockAction;
+  if (action === "edit") {
+    state.editingStockProductId = Number(button.dataset.id);
+    renderProducts();
+    $("#product-table [data-stock-value]")?.focus();
+    return;
+  }
+  if (action === "cancel") {
+    state.editingStockProductId = null;
+    renderProducts();
+    return;
+  }
+  if (action === "save") {
+    const id = Number(button.dataset.id);
+    const input = button.closest(".stock-edit").querySelector("[data-stock-value]");
+    const stock = Number(input.value);
+    if (!Number.isInteger(stock) || stock < 0) {
+      toast("Số lượng tồn phải là số nguyên không âm.", "error");
+      return;
+    }
+    button.disabled = true;
+    try {
+      await api(`/api/products/${id}/stock`, {
+        method: "PUT",
+        body: JSON.stringify({ stock })
+      });
+      state.editingStockProductId = null;
+      await refreshAll();
+      toast("Đã cập nhật số lượng tồn kho.");
+    } catch (error) {
+      toast(error.message, "error");
+      button.disabled = false;
+    }
   }
 });
 

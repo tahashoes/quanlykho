@@ -17,7 +17,17 @@ const isProduction = process.env.NODE_ENV === "production";
 const cookieSecure = process.env.COOKIE_SECURE === "true";
 const sessionDays = 7;
 const salesChannels = ["facebook", "zalo", "tiktok", "shopee", "website", "lazada"];
-const productUnits = ["đôi", "cái", "chai", "thùng", "cuộn", "tờ"];
+const productUnits = ["đôi", "cái", "chai", "thùng", "cuộn", "tờ", "sấp"];
+const orderStatuses = ["pending_pickup", "shipping", "completed", "returned", "cancelled"];
+const terminalOrderStatuses = new Set(["returned", "cancelled"]);
+const saleCategoryNames = new Set(["Giày", "Xịt khử mùi"]);
+const shoeBundleRules = [
+  { categoryName: "Vớ", quantity: 1, unit: "đôi", price: 9_000, perOrder: false },
+  { categoryName: "Xịt khử mùi", quantity: 1, unit: "chai", price: 10_000, perOrder: false },
+  { categoryName: "Thùng Carton", quantity: 1, unit: "thùng", price: 8_000, perOrder: false },
+  { categoryName: "Băng keo", quantity: 1, unit: "cuộn", price: 1_000, perOrder: false },
+  { categoryName: "Giấy in", quantity: 1, unit: "tờ", price: 200, perOrder: true }
+];
 const defaultCategories = [
   { name: "Giày", requiresSize: true, priceNote: "Đã bao gồm VAT 8%" },
   { name: "Vớ", requiresSize: true, priceNote: "Đã bao gồm VAT 8%" },
@@ -80,11 +90,13 @@ function ensureColumn(table, column, definition) {
 }
 
 ensureColumn("products", "image_data", "TEXT");
+ensureColumn("products", "shipping_cost", "REAL NOT NULL DEFAULT 0");
 ensureColumn("transactions", "sales_channel", "TEXT");
 ensureColumn("transactions", "order_code", "TEXT");
 ensureColumn("transactions", "operator_name", "TEXT");
 ensureColumn("transactions", "discount_type", "TEXT");
 ensureColumn("transactions", "discount_value", "REAL NOT NULL DEFAULT 0");
+ensureColumn("transactions", "line_role", "TEXT NOT NULL DEFAULT 'main'");
 ensureColumn("users", "display_name", "TEXT");
 db.exec(`
   CREATE TABLE IF NOT EXISTS categories (
@@ -92,6 +104,26 @@ db.exec(`
     name TEXT NOT NULL UNIQUE COLLATE NOCASE,
     requires_size INTEGER NOT NULL DEFAULT 0 CHECK(requires_size IN (0, 1)),
     price_note TEXT NOT NULL DEFAULT 'Đã bao gồm thuế/phí theo hóa đơn',
+    created_at TEXT NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS sales_orders (
+    id INTEGER PRIMARY KEY,
+    order_code TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    sales_channel TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending_pickup'
+      CHECK(status IN ('pending_pickup', 'shipping', 'completed', 'returned', 'cancelled')),
+    platform_fee REAL NOT NULL DEFAULT 0 CHECK(platform_fee >= 0),
+    operator_name TEXT,
+    stock_restored_at TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS stock_adjustments (
+    id INTEGER PRIMARY KEY,
+    product_id INTEGER NOT NULL REFERENCES products(id),
+    previous_stock INTEGER NOT NULL CHECK(previous_stock >= 0),
+    new_stock INTEGER NOT NULL CHECK(new_stock >= 0),
+    operator_name TEXT,
     created_at TEXT NOT NULL
   );
 `);
@@ -130,7 +162,24 @@ db.exec(`
   DROP INDEX IF EXISTS idx_transactions_order_code;
   CREATE INDEX idx_transactions_order_code ON transactions(order_code);
   CREATE INDEX IF NOT EXISTS idx_products_category_id ON products(category_id);
+  CREATE INDEX IF NOT EXISTS idx_sales_orders_status ON sales_orders(status);
+  CREATE INDEX IF NOT EXISTS idx_sales_orders_created_at ON sales_orders(created_at);
+  CREATE INDEX IF NOT EXISTS idx_stock_adjustments_product_id ON stock_adjustments(product_id);
 `);
+db.prepare(`
+  INSERT OR IGNORE INTO sales_orders
+    (order_code, sales_channel, status, platform_fee, operator_name, created_at, updated_at)
+  SELECT order_code,
+         COALESCE(MAX(sales_channel), 'unknown'),
+         'completed',
+         0,
+         MAX(operator_name),
+         MIN(created_at),
+         MAX(created_at)
+  FROM transactions
+  WHERE kind = 'OUT' AND order_code IS NOT NULL AND TRIM(order_code) <> ''
+  GROUP BY order_code
+`).run();
 db.prepare(`
   UPDATE users
   SET display_name = CASE
@@ -261,7 +310,7 @@ function cleanManagerPassword(value, required = true) {
 }
 
 function positiveInteger(value, label) {
-  const number = Number(value);
+  const number = numericValue(value);
   if (!Number.isInteger(number) || number <= 0) {
     throw new AppError(`${label} phải là số nguyên lớn hơn 0.`);
   }
@@ -269,11 +318,54 @@ function positiveInteger(value, label) {
 }
 
 function nonNegativeNumber(value, label) {
-  const number = Number(value);
+  const number = numericValue(value);
   if (!Number.isFinite(number) || number < 0) {
     throw new AppError(`${label} phải là số không âm.`);
   }
   return number;
+}
+
+function numericValue(value) {
+  if (typeof value === "string") {
+    return Number(value.replaceAll(",", "").replace(/\s/g, ""));
+  }
+  return Number(value);
+}
+
+function nonNegativeInteger(value, label) {
+  const number = numericValue(value);
+  if (!Number.isInteger(number) || number < 0) {
+    throw new AppError(`${label} phải là số nguyên không âm.`);
+  }
+  return number;
+}
+
+function cleanOrderStatus(value) {
+  const status = String(value ?? "").trim().toLowerCase();
+  if (!orderStatuses.includes(status)) {
+    throw new AppError("Trạng thái đơn hàng không hợp lệ.");
+  }
+  return status;
+}
+
+function landedCost(product) {
+  return Number(product.cost_price) + Number(product.shipping_cost || 0);
+}
+
+function normalizeStockInput(category, unitValue, quantityValue, costValue, shippingValue = 0) {
+  const unit = cleanUnit(unitValue);
+  const quantity = positiveInteger(quantityValue, "Số lượng nhập");
+  const costPrice = nonNegativeNumber(costValue, "Giá nhập");
+  const shippingCost = nonNegativeNumber(shippingValue || 0, "Phí vận chuyển");
+  if (category.name === "Giấy in" && unit === "sấp") {
+    return {
+      quantity: quantity * 500,
+      unit: "tờ",
+      costPrice: costPrice / 500,
+      shippingCost: shippingCost / 500
+    };
+  }
+  return { quantity, unit, costPrice, shippingCost };
 }
 
 function cleanImage(value) {
@@ -521,14 +613,18 @@ function getProductByCode(code) {
 }
 
 function productView(product) {
+  const shippingCost = Number(product.shipping_cost || 0);
+  const productLandedCost = Number(product.cost_price) + shippingCost;
   return {
     id: Number(product.id),
     code: product.code,
     name: product.name,
     stock: Number(product.stock),
     costPrice: Number(product.cost_price),
+    shippingCost,
+    landedCost: productLandedCost,
     salePrice: Number(product.sale_price),
-    inventoryValue: Number(product.stock) * Number(product.cost_price),
+    inventoryValue: Number(product.stock) * productLandedCost,
     categoryId: product.category_id ? Number(product.category_id) : null,
     categoryName: product.category_name || "Chưa phân loại",
     requiresSize: Boolean(product.requires_size),
@@ -545,41 +641,58 @@ function dashboard() {
   const figures = db.prepare(`
     SELECT
       COALESCE(SUM(CASE
-        WHEN kind = 'OUT' THEN quantity * CASE
-          WHEN discount_type = 'percent' THEN unit_price * (1 - discount_value / 100.0)
-          WHEN discount_type = 'amount' THEN MAX(0, unit_price - discount_value)
-          ELSE unit_price
+        WHEN t.kind = 'OUT'
+          AND t.line_role = 'main'
+          AND (so.id IS NULL OR so.status NOT IN ('returned', 'cancelled'))
+        THEN t.quantity * CASE
+          WHEN t.discount_type = 'percent' THEN t.unit_price * (1 - t.discount_value / 100.0)
+          WHEN t.discount_type = 'amount' THEN MAX(0, t.unit_price - t.discount_value)
+          ELSE t.unit_price
         END
         ELSE 0
       END), 0) AS revenue,
-      COALESCE(SUM(CASE WHEN kind = 'IN' THEN quantity * unit_price ELSE 0 END), 0) AS purchase_expense,
-      COALESCE(SUM(CASE WHEN kind = 'OUT' THEN quantity * unit_cost ELSE 0 END), 0) AS cogs
-    FROM transactions
+      COALESCE(SUM(CASE WHEN t.kind = 'IN' THEN t.quantity * t.unit_cost ELSE 0 END), 0)
+        AS purchase_expense,
+      COALESCE(SUM(CASE
+        WHEN t.kind = 'OUT' AND (so.id IS NULL OR so.status NOT IN ('returned', 'cancelled'))
+        THEN t.quantity * t.unit_cost ELSE 0 END), 0) AS cogs
+    FROM transactions t
+    LEFT JOIN sales_orders so ON so.order_code = t.order_code
   `).get();
+  const platformFees = Number(db.prepare(`
+    SELECT COALESCE(SUM(platform_fee), 0) AS total
+    FROM sales_orders
+    WHERE status NOT IN ('returned', 'cancelled')
+  `).get().total);
   const inventory = db.prepare(`
     SELECT COUNT(*) AS sku_count, COALESCE(SUM(stock), 0) AS total_units,
-           COALESCE(SUM(stock * cost_price), 0) AS inventory_value,
+           COALESCE(SUM(stock * (cost_price + COALESCE(shipping_cost, 0))), 0)
+             AS inventory_value,
            COALESCE(SUM(CASE WHEN stock <= 5 THEN 1 ELSE 0 END), 0) AS low_stock_count
     FROM products
   `).get();
   const recent = db.prepare(`
     SELECT t.id, t.kind, t.quantity, t.unit_price, t.unit_cost, t.sales_channel, t.order_code,
-           t.operator_name, t.discount_type, t.discount_value,
+           t.operator_name, t.discount_type, t.discount_value, t.line_role,
+           so.status AS order_status, so.platform_fee,
            t.created_at, p.code, p.name, p.category_id, p.size, p.color, p.unit,
            c.name AS category_name
     FROM transactions t
     JOIN products p ON p.id = t.product_id
     LEFT JOIN categories c ON c.id = p.category_id
+    LEFT JOIN sales_orders so ON so.order_code = t.order_code
     ORDER BY t.id DESC LIMIT 8
   `).all();
   const channelRanking = db.prepare(`
-    SELECT COALESCE(sales_channel, 'unknown') AS channel,
-           COUNT(DISTINCT COALESCE(order_code, 'LEGACY-' || id)) AS orders,
-           COALESCE(SUM(quantity), 0) AS units
-    FROM transactions
-    WHERE kind = 'OUT'
-      AND sales_channel IN ('facebook', 'zalo', 'tiktok', 'shopee', 'website', 'lazada')
-    GROUP BY COALESCE(sales_channel, 'unknown')
+    SELECT COALESCE(t.sales_channel, 'unknown') AS channel,
+           COUNT(DISTINCT COALESCE(t.order_code, 'LEGACY-' || t.id)) AS orders,
+           COALESCE(SUM(t.quantity), 0) AS units
+    FROM transactions t
+    LEFT JOIN sales_orders so ON so.order_code = t.order_code
+    WHERE t.kind = 'OUT' AND t.line_role = 'main'
+      AND (so.id IS NULL OR so.status NOT IN ('returned', 'cancelled'))
+      AND t.sales_channel IN ('facebook', 'zalo', 'tiktok', 'shopee', 'website', 'lazada')
+    GROUP BY COALESCE(t.sales_channel, 'unknown')
     ORDER BY orders DESC, units DESC, channel ASC
   `).all().map((row) => ({
     channel: row.channel,
@@ -592,7 +705,9 @@ function dashboard() {
            COALESCE(SUM(t.quantity), 0) AS units
     FROM transactions t
     JOIN products p ON p.id = t.product_id
-    WHERE t.kind = 'OUT'
+    LEFT JOIN sales_orders so ON so.order_code = t.order_code
+    WHERE t.kind = 'OUT' AND t.line_role = 'main'
+      AND (so.id IS NULL OR so.status NOT IN ('returned', 'cancelled'))
     GROUP BY t.product_id, p.code, p.name
     ORDER BY units DESC, orders DESC, p.name ASC
     LIMIT 5
@@ -617,7 +732,8 @@ function dashboard() {
     revenue: Number(figures.revenue),
     purchaseExpense: Number(figures.purchase_expense),
     cogs: Number(figures.cogs),
-    profit: Number(figures.revenue) - Number(figures.cogs),
+    platformFees,
+    profit: Number(figures.revenue) - platformFees - Number(figures.cogs),
     skuCount: Number(inventory.sku_count),
     totalUnits: Number(inventory.total_units),
     inventoryValue: Number(inventory.inventory_value),
@@ -653,8 +769,11 @@ function transactionView(row) {
     grossTotal,
     discountTotal,
     total: Math.max(0, grossTotal - discountTotal),
+    lineRole: row.line_role || "main",
     channel: row.sales_channel || null,
     orderCode: row.order_code || null,
+    orderStatus: row.order_status || null,
+    platformFee: Number(row.platform_fee || 0),
     operatorName: row.operator_name || null,
     createdAt: row.created_at,
     code: row.code,
@@ -682,12 +801,14 @@ function listProducts(search = "") {
 function listTransactions(limit = 500) {
   return db.prepare(`
     SELECT t.id, t.kind, t.quantity, t.unit_price, t.unit_cost, t.sales_channel, t.order_code,
-           t.operator_name, t.discount_type, t.discount_value,
+           t.operator_name, t.discount_type, t.discount_value, t.line_role,
+           so.status AS order_status, so.platform_fee,
            t.created_at, p.code, p.name, p.category_id, p.size, p.color, p.unit,
            c.name AS category_name
     FROM transactions t
     JOIN products p ON p.id = t.product_id
     LEFT JOIN categories c ON c.id = p.category_id
+    LEFT JOIN sales_orders so ON so.order_code = t.order_code
     ORDER BY t.id DESC LIMIT ?
   `).all(limit).map(transactionView);
 }
@@ -703,9 +824,14 @@ function addProduct(body, user) {
     throw new AppError(`Danh mục ${category.name} bắt buộc phải nhập size.`);
   }
   const color = cleanOptionalText(body.color, "Màu sắc", 80);
-  const unit = cleanUnit(body.unit);
-  const quantity = positiveInteger(body.quantity, "Số lượng");
-  const costPrice = nonNegativeNumber(body.costPrice, "Giá nhập");
+  const stockInput = normalizeStockInput(
+    category,
+    body.unit,
+    body.quantity,
+    body.costPrice,
+    body.shippingCost
+  );
+  const { unit, quantity, costPrice, shippingCost } = stockInput;
   const salePrice = body.salePrice === undefined || body.salePrice === ""
     ? 0
     : nonNegativeNumber(body.salePrice, "Giá bán");
@@ -718,14 +844,15 @@ function addProduct(body, user) {
     }
     const result = db.prepare(`
       INSERT INTO products
-        (code, name, stock, cost_price, sale_price, image_data, category_id, size, color, unit,
-         created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (code, name, stock, cost_price, shipping_cost, sale_price, image_data, category_id,
+         size, color, unit, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       code,
       name,
       quantity,
       costPrice,
+      shippingCost,
       salePrice,
       image,
       categoryId,
@@ -739,7 +866,14 @@ function addProduct(body, user) {
       INSERT INTO transactions
         (product_id, kind, quantity, unit_price, unit_cost, sales_channel, operator_name, created_at)
       VALUES (?, 'IN', ?, ?, ?, NULL, ?, ?)
-    `).run(Number(result.lastInsertRowid), quantity, costPrice, costPrice, user.name, timestamp);
+    `).run(
+      Number(result.lastInsertRowid),
+      quantity,
+      costPrice,
+      costPrice + shippingCost,
+      user.name,
+      timestamp
+    );
     db.exec("COMMIT");
   } catch (error) {
     db.exec("ROLLBACK");
@@ -750,29 +884,54 @@ function addProduct(body, user) {
 
 function receiveStock(body, user) {
   const code = cleanText(body.code, "Mã sản phẩm").toUpperCase();
-  const quantity = positiveInteger(body.quantity, "Số lượng nhập");
-  const costPrice = nonNegativeNumber(body.costPrice, "Đơn giá nhập");
+  const product = getProductByCode(code);
+  if (!product) throw new AppError("Không tìm thấy sản phẩm theo mã này.", 404);
+  const category = getCategoryById(product.category_id);
+  const stockInput = normalizeStockInput(
+    category,
+    body.inputUnit || product.unit,
+    body.quantity,
+    body.costPrice,
+    body.shippingCost
+  );
+  const { quantity, costPrice, shippingCost } = stockInput;
   const salePrice = body.salePrice === undefined || body.salePrice === ""
     ? undefined
     : nonNegativeNumber(body.salePrice, "Giá bán");
-  const product = getProductByCode(code);
-  if (!product) throw new AppError("Không tìm thấy sản phẩm theo mã này.", 404);
   const timestamp = now();
   const newStock = Number(product.stock) + quantity;
   const weightedCost = (
     (Number(product.stock) * Number(product.cost_price)) + (quantity * costPrice)
   ) / newStock;
+  const weightedShipping = (
+    (Number(product.stock) * Number(product.shipping_cost || 0)) + (quantity * shippingCost)
+  ) / newStock;
   db.exec("BEGIN IMMEDIATE");
   try {
     db.prepare(`
-      UPDATE products SET stock = ?, cost_price = ?, sale_price = ?, updated_at = ?
+      UPDATE products
+      SET stock = ?, cost_price = ?, shipping_cost = ?, sale_price = ?, updated_at = ?
       WHERE id = ?
-    `).run(newStock, weightedCost, salePrice ?? Number(product.sale_price), timestamp, product.id);
+    `).run(
+      newStock,
+      weightedCost,
+      weightedShipping,
+      salePrice ?? Number(product.sale_price),
+      timestamp,
+      product.id
+    );
     db.prepare(`
       INSERT INTO transactions
         (product_id, kind, quantity, unit_price, unit_cost, sales_channel, operator_name, created_at)
       VALUES (?, 'IN', ?, ?, ?, NULL, ?, ?)
-    `).run(product.id, quantity, costPrice, costPrice, user.name, timestamp);
+    `).run(
+      product.id,
+      quantity,
+      costPrice,
+      costPrice + shippingCost,
+      user.name,
+      timestamp
+    );
     db.exec("COMMIT");
   } catch (error) {
     db.exec("ROLLBACK");
@@ -781,12 +940,96 @@ function receiveStock(body, user) {
   return productView(getProductByCode(code));
 }
 
+function adjustStock(id, body, user) {
+  const product = db.prepare("SELECT id, code, stock FROM products WHERE id = ?").get(id);
+  if (!product) throw new AppError("Không tìm thấy sản phẩm.", 404);
+  const newStock = nonNegativeInteger(body.stock, "Số lượng tồn");
+  const timestamp = now();
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    db.prepare("UPDATE products SET stock = ?, updated_at = ? WHERE id = ?")
+      .run(newStock, timestamp, id);
+    db.prepare(`
+      INSERT INTO stock_adjustments
+        (product_id, previous_stock, new_stock, operator_name, created_at)
+      VALUES (?, ?, ?, ?, ?)
+    `).run(id, Number(product.stock), newStock, user.name, timestamp);
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+  return productView(getProductByCode(product.code));
+}
+
+function getBundleProduct(categoryName) {
+  return db.prepare(`
+    SELECT p.*, c.name AS category_name, c.requires_size, c.price_note
+    FROM products p
+    JOIN categories c ON c.id = p.category_id
+    WHERE c.name = ? AND p.stock > 0
+    ORDER BY p.stock DESC, p.id ASC
+    LIMIT 1
+  `).get(categoryName);
+}
+
+function salesConfigView() {
+  const allowedCategories = listCategories().filter((category) => (
+    saleCategoryNames.has(category.name)
+  ));
+  const addons = shoeBundleRules.map((rule) => {
+    const product = getBundleProduct(rule.categoryName);
+    return {
+      ...rule,
+      product: product ? productView(product) : null
+    };
+  });
+  return {
+    allowedCategories,
+    addons,
+    paperConversion: { purchaseUnit: "sấp", baseUnit: "tờ", quantity: 500 }
+  };
+}
+
+function vietnamOrderDate(date = new Date()) {
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat("en-GB", {
+      timeZone: "Asia/Ho_Chi_Minh",
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric"
+    }).formatToParts(date).filter((part) => part.type !== "literal").map((part) => (
+      [part.type, part.value]
+    ))
+  );
+  return `${parts.day}${parts.month}${parts.year}`;
+}
+
+function nextOrderCodeInfo(reservedCodes = new Set()) {
+  const date = vietnamOrderDate();
+  const prefix = `TAHA-${date}-`;
+  const rows = db.prepare(`
+    SELECT order_code FROM sales_orders WHERE order_code LIKE ?
+  `).all(`${prefix}%`);
+  let sequence = rows.reduce((maximum, row) => {
+    const match = new RegExp(`^${prefix}(\\d+)$`, "i").exec(row.order_code);
+    return match ? Math.max(maximum, Number(match[1])) : maximum;
+  }, 0) + 1;
+  let code = `${prefix}${String(sequence).padStart(3, "0")}`;
+  while (reservedCodes.has(code)) {
+    sequence += 1;
+    code = `${prefix}${String(sequence).padStart(3, "0")}`;
+  }
+  return { code, date, sequence };
+}
+
 function sellStock(body, user) {
   const channel = cleanChannel(body.channel);
   const rawOrders = Array.isArray(body.orders)
     ? body.orders
     : [{
       orderCode: body.orderCode,
+      platformFee: body.platformFee,
       items: [{
         code: body.code,
         quantity: body.quantity,
@@ -807,19 +1050,32 @@ function sellStock(body, user) {
   try {
     const orderCodes = new Set();
     const productCache = new Map();
+    const bundleProductCache = new Map();
     const stockRequirements = new Map();
+    const preparedOrders = [];
     const preparedLines = [];
-    let totalLineCount = 0;
+
+    const addStockRequirement = (product, quantity, salePrice) => {
+      const requirement = stockRequirements.get(product.id) || {
+        product,
+        quantity: 0,
+        salePrice: null
+      };
+      requirement.quantity += quantity;
+      if (salePrice !== null) requirement.salePrice = salePrice;
+      stockRequirements.set(product.id, requirement);
+    };
 
     for (const [orderIndex, rawOrder] of rawOrders.entries()) {
-      const orderCode = cleanOrderCode(rawOrder?.orderCode);
+      const generatedCode = nextOrderCodeInfo(orderCodes).code;
+      const orderCode = cleanOrderCode(rawOrder?.orderCode || generatedCode);
       if (orderCodes.has(orderCode)) {
         throw new AppError(`Mã đơn ${orderCode} đang bị nhập trùng trong đợt xuất.`);
       }
       orderCodes.add(orderCode);
-      const existingOrder = db.prepare(`
-        SELECT id FROM transactions WHERE kind = 'OUT' AND order_code = ? LIMIT 1
-      `).get(orderCode);
+      const existingOrder = db.prepare(
+        "SELECT id FROM sales_orders WHERE order_code = ? LIMIT 1"
+      ).get(orderCode);
       if (existingOrder) throw new AppError(`Mã đơn hàng ${orderCode} đã tồn tại.`);
 
       const rawItems = Array.isArray(rawOrder?.items) ? rawOrder.items : [];
@@ -827,14 +1083,13 @@ function sellStock(body, user) {
         throw new AppError(`Đơn ${orderCode} cần có ít nhất một sản phẩm.`);
       }
       if (rawItems.length > 50) {
-        throw new AppError(`Đơn ${orderCode} chỉ được có tối đa 50 sản phẩm.`);
+        throw new AppError(`Đơn ${orderCode} chỉ được có tối đa 50 sản phẩm chính.`);
       }
-      totalLineCount += rawItems.length;
-      if (totalLineCount > 200) {
-        throw new AppError("Mỗi lần xuất chỉ được có tối đa 200 dòng sản phẩm.");
-      }
-
+      const platformFee = nonNegativeNumber(rawOrder?.platformFee || 0, "Phí sàn");
       const orderProductCodes = new Set();
+      const orderLines = [];
+      let shoeUnits = 0;
+
       for (const [itemIndex, rawItem] of rawItems.entries()) {
         const code = cleanText(
           rawItem?.code,
@@ -851,6 +1106,9 @@ function sellStock(body, user) {
           if (!product) throw new AppError(`Không tìm thấy sản phẩm ${code}.`, 404);
           productCache.set(code, product);
         }
+        if (!saleCategoryNames.has(product.category_name)) {
+          throw new AppError("Khi xuất hàng chỉ được chọn danh mục Giày hoặc Xịt khử mùi.");
+        }
         if (
           rawItem?.categoryId !== undefined &&
           Number(rawItem.categoryId) !== Number(product.category_id)
@@ -864,24 +1122,56 @@ function sellStock(body, user) {
           rawItem?.discountValue,
           salePrice
         );
-        const requirement = stockRequirements.get(product.id) || {
-          product,
-          quantity: 0,
-          salePrice
-        };
-        requirement.quantity += quantity;
-        requirement.salePrice = salePrice;
-        stockRequirements.set(product.id, requirement);
-        preparedLines.push({
+        const line = {
           orderCode,
           product,
           quantity,
           salePrice,
-          discount
-        });
+          unitCost: landedCost(product),
+          discount,
+          lineRole: "main"
+        };
+        orderLines.push(line);
+        preparedLines.push(line);
+        addStockRequirement(product, quantity, salePrice);
+        if (product.category_name === "Giày") shoeUnits += quantity;
       }
+
+      if (shoeUnits > 0) {
+        for (const rule of shoeBundleRules) {
+          let product = bundleProductCache.get(rule.categoryName);
+          if (!product) {
+            product = getBundleProduct(rule.categoryName);
+            if (!product) {
+              throw new AppError(
+                `Chưa có tồn kho cho sản phẩm đi kèm ${rule.categoryName}. ` +
+                "Hãy nhập hàng trước khi xuất đơn Giày."
+              );
+            }
+            bundleProductCache.set(rule.categoryName, product);
+          }
+          const quantity = rule.perOrder ? rule.quantity : rule.quantity * shoeUnits;
+          const line = {
+            orderCode,
+            product,
+            quantity,
+            salePrice: rule.price,
+            unitCost: rule.price,
+            discount: { type: null, value: 0 },
+            lineRole: "addon"
+          };
+          orderLines.push(line);
+          preparedLines.push(line);
+          addStockRequirement(product, quantity, null);
+        }
+      }
+
+      preparedOrders.push({ orderCode, platformFee, lines: orderLines });
     }
 
+    if (preparedLines.length > 300) {
+      throw new AppError("Mỗi lần xuất chỉ được có tối đa 300 dòng sản phẩm kể cả hàng đi kèm.");
+    }
     for (const requirement of stockRequirements.values()) {
       if (Number(requirement.product.stock) < requirement.quantity) {
         throw new AppError(
@@ -891,41 +1181,63 @@ function sellStock(body, user) {
       }
     }
 
-    const updateProduct = db.prepare(`
-      UPDATE products SET stock = stock - ?, sale_price = ?, updated_at = ? WHERE id = ?
+    const insertOrder = db.prepare(`
+      INSERT INTO sales_orders
+        (order_code, sales_channel, status, platform_fee, operator_name, created_at, updated_at)
+      VALUES (?, ?, 'pending_pickup', ?, ?, ?, ?)
     `);
-    for (const requirement of stockRequirements.values()) {
-      updateProduct.run(
-        requirement.quantity,
-        requirement.salePrice,
+    for (const order of preparedOrders) {
+      insertOrder.run(
+        order.orderCode,
+        channel,
+        order.platformFee,
+        user.name,
         timestamp,
-        requirement.product.id
+        timestamp
       );
+    }
+
+    for (const requirement of stockRequirements.values()) {
+      if (requirement.salePrice === null) {
+        db.prepare("UPDATE products SET stock = stock - ?, updated_at = ? WHERE id = ?")
+          .run(requirement.quantity, timestamp, requirement.product.id);
+      } else {
+        db.prepare(`
+          UPDATE products SET stock = stock - ?, sale_price = ?, updated_at = ? WHERE id = ?
+        `).run(
+          requirement.quantity,
+          requirement.salePrice,
+          timestamp,
+          requirement.product.id
+        );
+      }
     }
 
     const insertTransaction = db.prepare(`
       INSERT INTO transactions
         (product_id, kind, quantity, unit_price, unit_cost, sales_channel, order_code,
-         operator_name, discount_type, discount_value, created_at)
-      VALUES (?, 'OUT', ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         operator_name, discount_type, discount_value, line_role, created_at)
+      VALUES (?, 'OUT', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     for (const line of preparedLines) {
       insertTransaction.run(
         line.product.id,
         line.quantity,
         line.salePrice,
-        Number(line.product.cost_price),
+        line.unitCost,
         channel,
         line.orderCode,
         user.name,
         line.discount.type,
         line.discount.value,
+        line.lineRole,
         timestamp
       );
     }
     db.exec("COMMIT");
     return {
-      ordersCreated: rawOrders.length,
+      ordersCreated: preparedOrders.length,
+      mainItemsCreated: preparedLines.filter((line) => line.lineRole === "main").length,
       itemsCreated: preparedLines.length,
       products: [...stockRequirements.values()].map((item) => (
         productView(getProductByCode(item.product.code))
@@ -935,6 +1247,126 @@ function sellStock(body, user) {
     db.exec("ROLLBACK");
     throw error;
   }
+}
+
+function orderView(order, itemRows) {
+  const items = itemRows.map(transactionView);
+  const mainItems = items.filter((item) => item.lineRole === "main");
+  const addons = items.filter((item) => item.lineRole === "addon");
+  const originalRevenue = mainItems.reduce((sum, item) => sum + item.total, 0);
+  const originalCogs = items.reduce((sum, item) => sum + item.quantity * item.unitCost, 0);
+  const reversed = terminalOrderStatuses.has(order.status);
+  const revenue = reversed ? 0 : originalRevenue;
+  const platformFee = reversed ? 0 : Number(order.platform_fee || 0);
+  const cogs = reversed ? 0 : originalCogs;
+  return {
+    id: Number(order.id),
+    orderCode: order.order_code,
+    channel: order.sales_channel,
+    status: order.status,
+    operatorName: order.operator_name || null,
+    createdAt: order.created_at,
+    updatedAt: order.updated_at,
+    stockRestoredAt: order.stock_restored_at || null,
+    revenue,
+    platformFee,
+    platformFeePercent: revenue > 0 ? platformFee * 100 / revenue : 0,
+    cogs,
+    profit: revenue - platformFee - cogs,
+    items: mainItems,
+    addons
+  };
+}
+
+function listOrders({ start, end, status, id, limit = 500 } = {}) {
+  const where = [];
+  const parameters = [];
+  if (start) {
+    where.push("created_at >= ?");
+    parameters.push(start);
+  }
+  if (end) {
+    where.push("created_at < ?");
+    parameters.push(end);
+  }
+  if (status) {
+    where.push("status = ?");
+    parameters.push(cleanOrderStatus(status));
+  }
+  if (id) {
+    where.push("id = ?");
+    parameters.push(id);
+  }
+  const orders = db.prepare(`
+    SELECT * FROM sales_orders
+    ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
+    ORDER BY created_at DESC, id DESC
+    LIMIT ?
+  `).all(...parameters, limit);
+  if (orders.length === 0) return [];
+  const placeholders = orders.map(() => "?").join(", ");
+  const itemRows = db.prepare(`
+    SELECT t.id, t.kind, t.quantity, t.unit_price, t.unit_cost, t.sales_channel, t.order_code,
+           t.operator_name, t.discount_type, t.discount_value, t.line_role,
+           so.status AS order_status, so.platform_fee,
+           t.created_at, p.code, p.name, p.category_id, p.size, p.color, p.unit,
+           c.name AS category_name
+    FROM transactions t
+    JOIN products p ON p.id = t.product_id
+    LEFT JOIN categories c ON c.id = p.category_id
+    LEFT JOIN sales_orders so ON so.order_code = t.order_code
+    WHERE t.kind = 'OUT' AND t.order_code IN (${placeholders})
+    ORDER BY t.id ASC
+  `).all(...orders.map((order) => order.order_code));
+  const itemsByOrder = new Map();
+  for (const item of itemRows) {
+    const rows = itemsByOrder.get(item.order_code) || [];
+    rows.push(item);
+    itemsByOrder.set(item.order_code, rows);
+  }
+  return orders.map((order) => orderView(order, itemsByOrder.get(order.order_code) || []));
+}
+
+function updateOrderStatus(id, body) {
+  const nextStatus = cleanOrderStatus(body.status);
+  const order = db.prepare("SELECT * FROM sales_orders WHERE id = ?").get(id);
+  if (!order) throw new AppError("Không tìm thấy đơn hàng.", 404);
+  if (order.status === nextStatus) return listOrders({ id, limit: 1 })[0];
+  if (terminalOrderStatuses.has(order.status)) {
+    throw new AppError("Đơn đã trả hoặc hủy là trạng thái cuối và không thể mở lại.");
+  }
+
+  const timestamp = now();
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    if (terminalOrderStatuses.has(nextStatus)) {
+      const quantities = db.prepare(`
+        SELECT product_id, SUM(quantity) AS quantity
+        FROM transactions
+        WHERE kind = 'OUT' AND order_code = ?
+        GROUP BY product_id
+      `).all(order.order_code);
+      const restoreProduct = db.prepare(`
+        UPDATE products SET stock = stock + ?, updated_at = ? WHERE id = ?
+      `);
+      for (const item of quantities) {
+        restoreProduct.run(Number(item.quantity), timestamp, item.product_id);
+      }
+      db.prepare(`
+        UPDATE sales_orders
+        SET status = ?, stock_restored_at = ?, updated_at = ?
+        WHERE id = ?
+      `).run(nextStatus, timestamp, timestamp, id);
+    } else {
+      db.prepare("UPDATE sales_orders SET status = ?, updated_at = ? WHERE id = ?")
+        .run(nextStatus, timestamp, id);
+    }
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+  return listOrders({ id, limit: 1 })[0];
 }
 
 function localDateText(date) {
@@ -985,53 +1417,57 @@ function periodRange(period, anchorValue) {
 function salesReport(period, anchor) {
   const range = periodRange(period, anchor);
   const rows = db.prepare(`
+    SELECT COALESCE(t.sales_channel, 'unknown') AS channel,
+           COUNT(DISTINCT COALESCE(t.order_code, 'LEGACY-' || t.id)) AS orders,
+           COALESCE(SUM(CASE WHEN t.line_role = 'main' THEN t.quantity ELSE 0 END), 0)
+             AS units,
+           COALESCE(SUM(CASE WHEN t.line_role = 'main' THEN t.quantity * CASE
+             WHEN t.discount_type = 'percent' THEN t.unit_price * (1 - t.discount_value / 100.0)
+             WHEN t.discount_type = 'amount' THEN MAX(0, t.unit_price - t.discount_value)
+             ELSE t.unit_price
+           END ELSE 0 END), 0) AS revenue,
+           COALESCE(SUM(t.quantity * t.unit_cost), 0) AS cogs
+    FROM transactions t
+    LEFT JOIN sales_orders so ON so.order_code = t.order_code
+    WHERE t.kind = 'OUT' AND t.created_at >= ? AND t.created_at < ?
+      AND (so.id IS NULL OR so.status NOT IN ('returned', 'cancelled'))
+    GROUP BY COALESCE(t.sales_channel, 'unknown')
+  `).all(range.start, range.end);
+  const feeRows = db.prepare(`
     SELECT COALESCE(sales_channel, 'unknown') AS channel,
-           COUNT(DISTINCT COALESCE(order_code, 'LEGACY-' || id)) AS orders,
-           COALESCE(SUM(quantity), 0) AS units,
-           COALESCE(SUM(quantity * CASE
-             WHEN discount_type = 'percent' THEN unit_price * (1 - discount_value / 100.0)
-             WHEN discount_type = 'amount' THEN MAX(0, unit_price - discount_value)
-             ELSE unit_price
-           END), 0) AS revenue,
-           COALESCE(SUM(quantity * unit_cost), 0) AS cogs
-    FROM transactions
-    WHERE kind = 'OUT' AND created_at >= ? AND created_at < ?
+           COALESCE(SUM(platform_fee), 0) AS platform_fee
+    FROM sales_orders
+    WHERE created_at >= ? AND created_at < ?
+      AND status NOT IN ('returned', 'cancelled')
     GROUP BY COALESCE(sales_channel, 'unknown')
   `).all(range.start, range.end);
   const rowMap = new Map(rows.map((row) => [row.channel, row]));
+  const feeMap = new Map(feeRows.map((row) => [row.channel, Number(row.platform_fee)]));
   const availableChannels = [...salesChannels];
   if (rowMap.has("unknown")) availableChannels.push("unknown");
   const channels = availableChannels.map((channel) => {
     const row = rowMap.get(channel);
     const revenue = Number(row?.revenue || 0);
     const cogs = Number(row?.cogs || 0);
+    const platformFees = feeMap.get(channel) || 0;
     return {
       channel,
       orders: Number(row?.orders || 0),
       units: Number(row?.units || 0),
       revenue,
+      platformFees,
       cogs,
-      profit: revenue - cogs
+      profit: revenue - platformFees - cogs
     };
   });
   const totals = channels.reduce((result, item) => ({
     orders: result.orders + item.orders,
     units: result.units + item.units,
     revenue: result.revenue + item.revenue,
+    platformFees: result.platformFees + item.platformFees,
     cogs: result.cogs + item.cogs,
     profit: result.profit + item.profit
-  }), { orders: 0, units: 0, revenue: 0, cogs: 0, profit: 0 });
-  const transactions = db.prepare(`
-    SELECT t.id, t.kind, t.quantity, t.unit_price, t.unit_cost, t.sales_channel, t.order_code,
-           t.operator_name, t.discount_type, t.discount_value,
-           t.created_at, p.code, p.name, p.category_id, p.size, p.color, p.unit,
-           c.name AS category_name
-    FROM transactions t
-    JOIN products p ON p.id = t.product_id
-    LEFT JOIN categories c ON c.id = p.category_id
-    WHERE t.kind = 'OUT' AND t.created_at >= ? AND t.created_at < ?
-    ORDER BY t.id DESC LIMIT 500
-  `).all(range.start, range.end).map(transactionView);
+  }), { orders: 0, units: 0, revenue: 0, platformFees: 0, cogs: 0, profit: 0 });
   const products = db.prepare(`
     SELECT p.code, p.name,
            COUNT(DISTINCT COALESCE(t.order_code, 'LEGACY-' || t.id)) AS orders,
@@ -1043,7 +1479,10 @@ function salesReport(period, anchor) {
            END), 0) AS revenue
     FROM transactions t
     JOIN products p ON p.id = t.product_id
-    WHERE t.kind = 'OUT' AND t.created_at >= ? AND t.created_at < ?
+    LEFT JOIN sales_orders so ON so.order_code = t.order_code
+    WHERE t.kind = 'OUT' AND t.line_role = 'main'
+      AND t.created_at >= ? AND t.created_at < ?
+      AND (so.id IS NULL OR so.status NOT IN ('returned', 'cancelled'))
     GROUP BY t.product_id, p.code, p.name
     ORDER BY units DESC, revenue DESC, p.name ASC
     LIMIT 10
@@ -1054,7 +1493,8 @@ function salesReport(period, anchor) {
     units: Number(row.units),
     revenue: Number(row.revenue)
   }));
-  return { range, channels, totals, products, transactions };
+  const orders = listOrders({ start: range.start, end: range.end, limit: 500 });
+  return { range, channels, totals, products, orders };
 }
 
 function managerView(user) {
@@ -1189,6 +1629,11 @@ function routeId(pathname, prefix) {
   return match ? Number(match[1]) : null;
 }
 
+function routeActionId(pathname, prefix, action) {
+  const match = new RegExp(`^${prefix}/(\\d+)/${action}$`).exec(pathname);
+  return match ? Number(match[1]) : null;
+}
+
 async function serveStatic(response, url) {
   const requested = url.pathname === "/" ? "index.html" : basename(url.pathname);
   const filePath = resolve(publicDir, requested);
@@ -1237,6 +1682,15 @@ const server = createServer(async (request, response) => {
     if (request.method === "GET" && url.pathname === "/api/transactions") {
       return json(response, 200, listTransactions());
     }
+    if (request.method === "GET" && url.pathname === "/api/sales/config") {
+      return json(response, 200, salesConfigView());
+    }
+    if (request.method === "GET" && url.pathname === "/api/orders/next-code") {
+      return json(response, 200, nextOrderCodeInfo());
+    }
+    if (request.method === "GET" && url.pathname === "/api/orders") {
+      return json(response, 200, listOrders({ status: url.searchParams.get("status") || undefined }));
+    }
     if (request.method === "GET" && url.pathname === "/api/reports") {
       return json(
         response,
@@ -1252,6 +1706,14 @@ const server = createServer(async (request, response) => {
     }
     if (request.method === "POST" && url.pathname === "/api/sales") {
       return json(response, 201, sellStock(await readJson(request), user));
+    }
+    const stockProductId = routeActionId(url.pathname, "/api/products", "stock");
+    if (request.method === "PUT" && stockProductId !== null) {
+      return json(response, 200, adjustStock(stockProductId, await readJson(request), user));
+    }
+    const statusOrderId = routeActionId(url.pathname, "/api/orders", "status");
+    if (request.method === "PUT" && statusOrderId !== null) {
+      return json(response, 200, updateOrderStatus(statusOrderId, await readJson(request)));
     }
     if (request.method === "PUT" && url.pathname === "/api/admin/password") {
       requireAdmin(user);

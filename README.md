@@ -9,16 +9,21 @@
 - Đơn vị hàng hóa hỗ trợ: đôi, cái, chai, thùng, cuộn và tờ.
 - Nhập thêm hàng; giá nhập bình quân được cập nhật tự động.
 - Lịch sử nhập hàng hiển thị sản phẩm, số lượng, đơn giá, người thực hiện và thời gian cập nhật.
-- Xuất nhiều đơn hàng cùng lúc cho một kênh; mỗi mã đơn có thể chứa nhiều sản phẩm.
+- Xuất nhiều đơn hàng cùng lúc cho một kênh; mỗi mã đơn có thể chứa nhiều sản phẩm chính thuộc 2 danh mục Giày và Xịt khử mùi.
+- Mã đơn mặc định theo mẫu `TAHA-DDMMYYYY-001` và tự tăng theo từng ngày.
+- Đơn Giày tự trừ kho bộ hàng đi kèm cố định: Vớ 9.000đ, Xịt khử mùi 10.000đ, Thùng Carton 8.000đ, Băng keo 1.000đ và 1 tờ giấy in 200đ.
+- Giấy in có thể nhập theo sấp; hệ thống tự quy đổi 1 sấp thành 500 tờ và trừ 1 tờ cho mỗi đơn Giày.
+- Mỗi đơn có phí sàn riêng; giao diện tự quy đổi số tiền phí sang tỷ lệ phần trăm doanh thu.
+- Năm trạng thái đơn gồm Đang chờ lấy, Đang vận chuyển, Hoàn thành, Trả hàng và Hủy đơn. Trả/Hủy hoàn kho đúng một lần và đưa doanh thu đơn về 0.
 - Hỗ trợ 6 kênh: Facebook, Zalo, TikTok, Shopee, Website và Lazada.
-- Mỗi sản phẩm trong đơn có số lượng, giá bán và giảm giá riêng theo phần trăm hoặc số tiền trên mỗi sản phẩm.
+- Mỗi sản phẩm chính trong đơn có số lượng và giá bán riêng; sản phẩm đi kèm dùng số lượng, đơn vị và giá vốn cố định, không sửa tại lúc xuất.
 - Một đợt xuất chỉ cập nhật khi toàn bộ đơn hợp lệ; nếu có một dòng sai hoặc không đủ tồn, kho không bị thay đổi.
-- Lịch sử xuất hàng hiển thị mã đơn, kênh bán, sản phẩm, giảm giá, thành tiền sau giảm, người thực hiện và thời gian xuất.
+- Lịch sử xuất hàng gom theo mã đơn, hiển thị sản phẩm chính, hàng đi kèm, phí sàn, giá vốn, lợi nhuận và trạng thái.
 - Khi chọn mã sản phẩm để xuất, giao diện hiển thị ngay tên, ảnh và số lượng tồn.
 - Luồng xuất hàng đi theo thứ tự kênh bán → danh mục hàng hóa → mã sản phẩm, đồng thời hiển thị size, màu sắc và đơn vị tương ứng của hàng đã nhập.
 - Tồn kho giảm ngay khi xuất; không thể xuất vượt quá số lượng hiện có.
 - Báo cáo theo ngày, tuần hoặc tháng:
-  - doanh thu và lợi nhuận;
+  - doanh thu, phí sàn, giá vốn và lợi nhuận;
   - số đơn hàng bán ra;
   - tổng số lượng sản phẩm bán ra;
   - thống kê riêng từng kênh và tổng tất cả các kênh.
@@ -30,7 +35,7 @@
 - Số điện thoại quản lý phải có đúng 10 số, bắt đầu bằng số 0; mật khẩu tối thiểu 6 ký tự và có ít nhất một ký tự đặc biệt.
 - Quản lý được nhập hàng, xuất hàng, xem tồn kho và báo cáo nhưng không được quản lý tài khoản.
 
-Số đơn hàng được đếm theo mã đơn duy nhất, không phụ thuộc số dòng sản phẩm trong đơn. Doanh thu và lợi nhuận được tính theo thành tiền sau giảm giá.
+Số đơn hàng được đếm theo mã đơn duy nhất, không phụ thuộc số dòng sản phẩm. Doanh thu chỉ tính sản phẩm chính. Giá vốn gồm giá nhập cộng phí vận chuyển của sản phẩm chính và toàn bộ giá cố định của hàng đi kèm. Lợi nhuận bằng doanh thu trừ phí sàn và giá vốn.
 
 ## Công nghệ
 

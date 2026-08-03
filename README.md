@@ -9,17 +9,17 @@
 - Đơn vị mặc định được khóa theo danh mục: Giày/Vớ là đôi, Xịt khử mùi là chai, Thùng Carton là thùng, Băng keo là cuộn và Giấy in là sấp.
 - Nhập lại một mã sản phẩm ngay trên cùng biểu mẫu sẽ cộng tồn và cập nhật giá nhập, phí vận chuyển bình quân; không còn màn hình “Bổ sung tồn”.
 - Lịch sử nhập hàng hiển thị sản phẩm, số lượng, đơn giá, người thực hiện và thời gian cập nhật.
-- Xuất nhiều đơn hàng cùng lúc cho một kênh; luồng chọn theo thứ tự kênh bán → danh mục → mã sản phẩm và hỗ trợ mọi danh mục đang có.
+- Xuất nhiều đơn hàng cùng lúc cho một kênh; luồng chọn theo thứ tự kênh bán → danh mục → mã sản phẩm. Chỉ Giày và Xịt khử mùi được chọn làm sản phẩm xuất chính.
 - Mã đơn mặc định theo mẫu `TAHA-DDMMYYYY-001` và tự tăng theo từng ngày.
 - Đơn Giày tự trừ kho bộ hàng đi kèm cố định: Vớ 9.000đ, Xịt khử mùi 10.000đ, Thùng Carton 8.000đ, Băng keo 1.000đ và 1 tờ giấy in 200đ.
 - Giấy in có thể nhập theo sấp; hệ thống tự quy đổi 1 sấp thành 500 tờ và trừ 1 tờ cho mỗi đơn Giày.
-- Mỗi đơn có bốn tab tài chính theo đúng thứ tự DOANH THU → PHÍ SÀN → GIÁ VỐN → LỢI NHUẬN. Ô phí sàn nằm ngay trong tab PHÍ SÀN và tự quy đổi số tiền sang tỷ lệ phần trăm doanh thu.
+- Mỗi đơn có bốn tab tài chính theo đúng thứ tự DOANH THU → PHÍ SÀN → GIÁ VỐN → LỢI NHUẬN. Ô phí sàn nằm ngay trong tab PHÍ SÀN và tự quy đổi số tiền sang tỷ lệ phần trăm doanh thu; tab GIÁ VỐN liệt kê phép cộng chi phí của từng sản phẩm.
 - Sáu trạng thái đơn gồm Đang chờ lấy, Đang vận chuyển, Đã giao, Hoàn thành, Trả hàng và Hủy đơn. Hoàn thành/Trả hàng/Hủy đơn là trạng thái kết thúc; Trả/Hủy hoàn kho đúng một lần và đưa doanh thu đơn về 0.
 - Hỗ trợ 6 kênh: Facebook, Zalo, TikTok, Shopee, Website và Lazada.
 - Mỗi sản phẩm chính trong đơn có số lượng và giá bán riêng; sản phẩm đi kèm dùng số lượng, đơn vị và giá vốn cố định, không sửa tại lúc xuất.
 - Một đợt xuất chỉ cập nhật khi toàn bộ đơn hợp lệ; nếu có một dòng sai hoặc không đủ tồn, kho không bị thay đổi.
 - Lịch sử xuất hàng gom theo mã đơn, hiển thị sản phẩm chính, hàng đi kèm, phí sàn, giá vốn, lợi nhuận và trạng thái.
-- Khi chọn mã sản phẩm để xuất, giao diện hiển thị ngay tên, ảnh và số lượng tồn.
+- Khi chọn mã sản phẩm để xuất, giao diện hiển thị ngay tên, ảnh và số lượng tồn; ô số lượng báo đỏ tức thời nếu nhập vượt tồn kho.
 - Luồng xuất hàng đi theo thứ tự kênh bán → danh mục hàng hóa → mã sản phẩm, đồng thời hiển thị size, màu sắc và đơn vị tương ứng của hàng đã nhập.
 - Tồn kho giảm ngay khi xuất; không thể xuất vượt quá số lượng hiện có.
 - Báo cáo theo ngày, tuần hoặc tháng:
@@ -29,7 +29,7 @@
   - thống kê riêng từng kênh và tổng tất cả các kênh.
 - Biểu đồ tròn trong Báo cáo thể hiện tỷ trọng kênh bán nhiều nhất, ít nhất trong kỳ; biểu đồ cột xếp hạng các sản phẩm bán chạy.
 - Biểu đồ tròn và biểu đồ cột ở Tổng quan thống kê kênh nhiều đơn nhất, sản phẩm bán nhiều nhất và sản phẩm tồn kho nhiều nhất.
-- Đăng nhập bằng số điện thoại và mật khẩu, có kiểm tra định dạng và nút hiện/ẩn mật khẩu.
+- Admin đăng nhập bằng tên đăng nhập riêng; tài khoản quản lý tiếp tục dùng số điện thoại và mật khẩu. Giao diện có kiểm tra định dạng và nút hiện/ẩn mật khẩu.
 - Admin có thể thêm, sửa và xóa tối đa 5 tài khoản quản lý; tên, số điện thoại và mật khẩu là bắt buộc khi tạo mới.
 - Admin có thể tự đổi mật khẩu sau khi xác minh mật khẩu hiện tại; các phiên đăng nhập admin khác sẽ được đăng xuất.
 - Admin có thể xóa toàn bộ sản phẩm, tồn kho, dữ liệu nhập/xuất và lịch sử sau khi nhập lại mật khẩu; tài khoản và danh mục hàng hóa được giữ nguyên.
@@ -61,7 +61,7 @@ node server.js
 
 Mở `http://localhost:3000`. Khi chạy thử không đặt `NODE_ENV=production`, tài khoản mặc định là:
 
-- Số điện thoại: `0900000000`
+- Tên đăng nhập: `admin@tahashoes`
 - Mật khẩu: `Admin@123`
 
 Không sử dụng tài khoản mặc định này cho môi trường thực tế.
@@ -82,7 +82,7 @@ npm test
    cp .env.example .env
    ```
 
-4. Mở `.env`, thay `ADMIN_PHONE` và `ADMIN_PASSWORD` bằng thông tin admin thật. Mật khẩu phải có ít nhất 8 ký tự.
+4. Mở `.env`, thay `ADMIN_LOGIN` và `ADMIN_PASSWORD` bằng thông tin admin thật. Mật khẩu phải có ít nhất 8 ký tự; tăng `ADMIN_CREDENTIALS_VERSION` khi cần áp dụng lại thông tin cho admin hiện có.
 5. Khởi chạy:
 
    ```bash

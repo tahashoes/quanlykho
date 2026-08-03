@@ -21,6 +21,8 @@ jobs:
       VPS_USER: ${{ secrets.VPS_USER }}
       VPS_PROJECT_PATH: ${{ secrets.VPS_PROJECT_PATH }}
       VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+      APP_ADMIN_LOGIN: ${{ secrets.APP_ADMIN_LOGIN }}
+      APP_ADMIN_PASSWORD: ${{ secrets.APP_ADMIN_PASSWORD }}
 
     steps:
       - name: Validate deployment target
@@ -32,6 +34,8 @@ jobs:
           test "$VPS_USER" = "root"
           test "$VPS_PROJECT_PATH" = "/opt/quanlykho"
           test -n "$VPS_SSH_KEY"
+          test -n "$APP_ADMIN_LOGIN"
+          test -n "$APP_ADMIN_PASSWORD"
 
       - name: Configure SSH
         shell: bash
@@ -50,6 +54,12 @@ jobs:
         run: |
           set -euo pipefail
           ssh_dir="$RUNNER_TEMP/quanlykho-ssh"
+          admin_login_b64="$(printf '%s' "$APP_ADMIN_LOGIN" | base64 -w 0)"
+          admin_password_b64="$(printf '%s' "$APP_ADMIN_PASSWORD" | base64 -w 0)"
+          admin_credentials_version="$(printf '%s\0%s' "$APP_ADMIN_LOGIN" "$APP_ADMIN_PASSWORD" | sha256sum | cut -d ' ' -f 1)"
+          echo "::add-mask::$admin_login_b64"
+          echo "::add-mask::$admin_password_b64"
+          echo "::add-mask::$admin_credentials_version"
           ssh \
             -i "$ssh_dir/id_ed25519" \
             -o IdentitiesOnly=yes \
@@ -57,11 +67,17 @@ jobs:
             -o UserKnownHostsFile="$ssh_dir/known_hosts" \
             -p "$VPS_PORT" \
             "$VPS_USER@$VPS_HOST" \
-            "bash -s -- '$VPS_PROJECT_PATH' '$GITHUB_SHA'" <<'REMOTE_SCRIPT'
+            "bash -s -- '$VPS_PROJECT_PATH' '$GITHUB_SHA' '$admin_login_b64' '$admin_password_b64' '$admin_credentials_version'" <<'REMOTE_SCRIPT'
           set -euo pipefail
 
           project_path="$1"
           target_sha="$2"
+          admin_login="$(printf '%s' "$3" | base64 --decode)"
+          admin_password="$(printf '%s' "$4" | base64 --decode)"
+          admin_credentials_version="$5"
+          export ADMIN_LOGIN="$admin_login"
+          export ADMIN_PASSWORD="$admin_password"
+          export ADMIN_CREDENTIALS_VERSION="$admin_credentials_version"
           repository_url="https://github.com/tahashoes/quanlykho.git"
           compose_file="compose.production.yaml"
           service_name="quanlykho"

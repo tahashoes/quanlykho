@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import { scryptSync } from "node:crypto";
 import { mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -71,7 +72,30 @@ test("luồng nhập/xuất theo danh mục, công thức lợi nhuận và rese
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
+    CREATE TABLE users (
+      id INTEGER PRIMARY KEY,
+      display_name TEXT NOT NULL,
+      phone TEXT NOT NULL UNIQUE,
+      password_hash TEXT NOT NULL,
+      password_salt TEXT NOT NULL,
+      role TEXT NOT NULL CHECK(role IN ('admin', 'manager')),
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
   `);
+  const legacyAdminSalt = "00112233445566778899aabbccddeeff";
+  legacyDatabase.prepare(`
+    INSERT INTO users
+      (display_name, phone, password_hash, password_salt, role, created_at, updated_at)
+    VALUES (?, ?, ?, ?, 'admin', ?, ?)
+  `).run(
+    "Quản trị viên",
+    "0900000000",
+    scryptSync("OldAdmin@123", legacyAdminSalt, 64).toString("hex"),
+    legacyAdminSalt,
+    "2025-01-01T00:00:00.000Z",
+    "2025-01-01T00:00:00.000Z"
+  );
   legacyDatabase.close();
 
   const port = 32_000 + (process.pid % 1_000);
@@ -82,8 +106,9 @@ test("luồng nhập/xuất theo danh mục, công thức lợi nhuận và rese
       ...process.env,
       PORT: String(port),
       DB_PATH: databasePath,
-      ADMIN_PHONE: "0900000000",
+      ADMIN_LOGIN: "admin@tahashoes",
       ADMIN_PASSWORD: "Admin@123",
+      ADMIN_CREDENTIALS_VERSION: "integration-admin-v1",
       COOKIE_SECURE: "false"
     },
     stdio: ["ignore", "pipe", "pipe"]
@@ -99,12 +124,25 @@ test("luồng nhập/xuất theo danh mục, công thức lợi nhuận và rese
     assert.doesNotMatch(page, /Bổ sung tồn|Nhập thêm hàng/);
     const appScript = await (await fetch(`${baseUrl}/app.js`)).text();
     assert.match(appScript, /delivered: "Đã giao"/);
+    assert.match(appScript, /data-sale-stock-note/);
+    assert.match(appScript, /Tồn không đủ/);
+    assert.match(appScript, /data-draft-cogs-breakdown/);
+    const styles = await (await fetch(`${baseUrl}/styles.css`)).text();
+    assert.match(styles, /input\.has-value/);
 
     const login = await request(baseUrl, "/api/auth/login", {
       method: "POST",
-      body: JSON.stringify({ phone: "0900000000", password: "Admin@123" })
+      body: JSON.stringify({ login: "admin@tahashoes", password: "Admin@123" })
     });
     assert.equal(login.payload.role, "admin");
+    assert.equal(login.payload.login, "admin@tahashoes");
+    await assert.rejects(
+      request(baseUrl, "/api/auth/login", {
+        method: "POST",
+        body: JSON.stringify({ phone: "0900000000", password: "OldAdmin@123" })
+      }),
+      /Tên đăng nhập hoặc mật khẩu không đúng/
+    );
     const cookie = login.response.headers.get("set-cookie").split(";")[0];
     const authHeaders = { Cookie: cookie };
 
@@ -238,7 +276,10 @@ test("luồng nhập/xuất theo danh mục, công thức lợi nhuận và rese
     assert.equal(paper.shippingCost, 100);
 
     const config = await request(baseUrl, "/api/sales/config", { headers: authHeaders });
-    assert.equal(config.payload.allowedCategories.length, 7);
+    assert.deepEqual(
+      config.payload.allowedCategories.map((category) => category.name),
+      ["Giày", "Xịt khử mùi"]
+    );
     assert.equal(config.payload.addons.length, 5);
     assert.equal(
       config.payload.addons.find((item) => item.categoryName === "Giấy in").perOrder,
@@ -249,6 +290,27 @@ test("luồng nhập/xuất theo danh mục, công thức lợi nhuận và rese
       headers: authHeaders
     });
     assert.match(nextCode.payload.code, /^TAHA-\d{8}-001$/);
+
+    await assert.rejects(
+      request(baseUrl, "/api/sales", {
+        method: "POST",
+        headers: authHeaders,
+        body: JSON.stringify({
+          channel: "shopee",
+          orders: [{
+            orderCode: "INVALID-MAIN-01",
+            platformFee: 0,
+            items: [{
+              categoryId: categories["Vớ"].id,
+              code: "VO-MD",
+              quantity: 1,
+              salePrice: 9000
+            }]
+          }]
+        })
+      }),
+      /chỉ cho phép chọn danh mục Giày hoặc Xịt khử mùi/
+    );
 
     const sale = await request(baseUrl, "/api/sales", {
       method: "POST",

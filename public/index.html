@@ -124,7 +124,7 @@
                 <label class="form-wide">Danh mục hàng hóa
                   <select required name="categoryId"><option value="">Chọn danh mục</option></select>
                 </label>
-                <label>Mã sản phẩm<input required name="code" placeholder="VD: SP-001" maxlength="50" /></label>
+                <label>Mã sản phẩm<input required name="code" class="uppercase-input" placeholder="VD: SP-001" maxlength="50" /></label>
                 <label>Tên hàng hóa <span class="optional">(không bắt buộc)</span><input name="name" placeholder="VD: Giày cao gót" maxlength="160" /></label>
                 <label id="new-product-size-field" class="hidden">Size<input name="size" maxlength="50" placeholder="VD: 38" /></label>
                 <label>Màu sắc <span class="optional">(không bắt buộc)</span><input name="color" maxlength="80" placeholder="VD: Đen" /></label>
@@ -138,10 +138,12 @@
                     <option value="thùng">Thùng</option>
                     <option value="cuộn">Cuộn</option>
                     <option value="tờ">Tờ</option>
+                    <option value="sấp">Sấp (Giấy in = 500 tờ)</option>
                   </select>
                 </label>
-                <label>Giá nhập <small class="price-note" id="new-product-price-note"></small><input required name="costPrice" type="number" min="0" step="1000" placeholder="0" /></label>
-                <label>Giá bán <span class="optional">(không bắt buộc)</span><input name="salePrice" type="number" min="0" step="1000" placeholder="Có thể cập nhật khi xuất hàng" /></label>
+                <label>Giá nhập <small class="price-note" id="new-product-price-note"></small><input required name="costPrice" inputmode="numeric" data-money-input placeholder="0" /></label>
+                <label>Phí vận chuyển / đơn vị <input name="shippingCost" inputmode="numeric" data-money-input value="0" placeholder="0" /></label>
+                <label>Giá bán <span class="optional">(không bắt buộc)</span><input name="salePrice" inputmode="numeric" data-money-input placeholder="Có thể cập nhật khi xuất hàng" /></label>
                 <label class="image-field">Hình ảnh sản phẩm <span class="optional">(không bắt buộc)</span><input id="product-image-input" name="imageFile" type="file" accept="image/jpeg,image/png,image/webp" /></label>
                 <div class="image-preview hidden" id="image-preview"><img alt="Ảnh sản phẩm xem trước" /><button type="button" class="text-button" id="remove-image">Xóa ảnh</button></div>
                 <button class="button button-primary" type="submit">Lưu hàng hóa</button>
@@ -159,15 +161,19 @@
                 <label>Tên sản phẩm<input name="name" readonly placeholder="Tự hiển thị theo mã" /></label>
                 <div class="selected-product hidden" id="receive-product-preview"></div>
                 <label>Số lượng nhập<input required name="quantity" type="number" min="1" step="1" placeholder="0" /></label>
-                <label>Giá nhập <small class="price-note" id="receive-price-note"></small><input required name="costPrice" type="number" min="0" step="1000" placeholder="0" /></label>
-                <label>Giá bán mới <span class="optional">(không bắt buộc)</span><input name="salePrice" type="number" min="0" step="1000" placeholder="Giữ nguyên giá hiện tại" /></label>
+                <label>Đơn vị nhập
+                  <select required name="inputUnit" disabled><option value="">Chọn mã sản phẩm trước</option></select>
+                </label>
+                <label>Giá nhập <small class="price-note" id="receive-price-note"></small><input required name="costPrice" inputmode="numeric" data-money-input placeholder="0" /></label>
+                <label>Phí vận chuyển / đơn vị <input name="shippingCost" inputmode="numeric" data-money-input value="0" placeholder="0" /></label>
+                <label>Giá bán mới <span class="optional">(không bắt buộc)</span><input name="salePrice" inputmode="numeric" data-money-input placeholder="Giữ nguyên giá hiện tại" /></label>
                 <button class="button button-primary" type="submit">Xác nhận nhập</button>
               </form>
             </article>
           </div>
           <article class="card full-card history-card">
             <div class="card-heading"><div><p class="eyebrow">Nhật ký kho</p><h2>Lịch sử nhập hàng</h2></div></div>
-            <div class="table-wrap"><table><thead><tr><th>Thời gian cập nhật</th><th>Người nhập</th><th>Danh mục</th><th>Mã sản phẩm</th><th>Size / Màu</th><th>Số lượng</th><th>Đơn vị</th><th>Giá nhập</th><th>Thành tiền</th></tr></thead><tbody id="receipt-history-table"></tbody></table></div>
+            <div class="table-wrap"><table><thead><tr><th>Thời gian</th><th>Người nhập</th><th>Sản phẩm</th><th>Mã</th><th>Size / Màu</th><th>Số lượng</th><th>Đơn vị</th><th>Giá nhập</th><th>Phí VC</th><th>Giá vốn nhập</th></tr></thead><tbody id="receipt-history-table"></tbody></table></div>
           </article>
         </section>
 
@@ -175,7 +181,7 @@
           <article class="card sales-note sales-note-compact">
             <div class="sales-note-copy">
               <p class="eyebrow">Tự động cập nhật</p><h2>Tồn kho luôn chính xác</h2>
-              <p>Một kênh bán có thể nhập nhiều đơn, mỗi đơn có nhiều sản phẩm. Hệ thống chỉ trừ kho sau khi toàn bộ đợt xuất hợp lệ.</p>
+              <p>Mỗi đơn có thể có nhiều sản phẩm chính. Đơn Giày tự thêm Vớ, Xịt khử mùi, Thùng Carton, Băng keo và 1 tờ giấy in.</p>
             </div>
             <div class="channel-cloud"><span>Facebook</span><span>Zalo</span><span>TikTok</span><span>Shopee</span><span>Website</span><span>Lazada</span></div>
           </article>
@@ -212,16 +218,17 @@
               </div>
             </form>
           </article>
-          <article class="card full-card history-card">
-            <div class="card-heading"><div><p class="eyebrow">Nhật ký bán hàng</p><h2>Lịch sử xuất hàng</h2></div></div>
-            <div class="table-wrap"><table><thead><tr><th>Thời gian xuất</th><th>Người xuất</th><th>Mã đơn</th><th>Kênh</th><th>Danh mục</th><th>Mã sản phẩm</th><th>Size / Màu</th><th>Số lượng</th><th>Đơn vị</th><th>Giá bán</th><th>Giảm giá</th><th>Thành tiền</th></tr></thead><tbody id="sale-history-table"></tbody></table></div>
+          <article class="card full-card history-card order-history-shell">
+            <div class="card-heading order-history-heading"><div><p class="eyebrow">Trạng thái đơn hàng</p><h2>Lịch sử xuất hàng</h2></div><span class="history-help">Mỗi đơn chỉ hiển thị một lần</span></div>
+            <div class="order-status-tabs" id="order-status-tabs"></div>
+            <div class="order-history-list" id="sale-order-history"></div>
           </article>
         </section>
 
         <section class="view" id="inventory-view">
           <article class="card full-card">
             <div class="card-heading inventory-header"><div><p class="eyebrow">Danh mục sản phẩm</p><h2>Quản lý tồn kho</h2></div><label class="search"><span>Tìm kiếm</span><input id="product-search" placeholder="Mã, danh mục, size hoặc màu" /></label></div>
-            <div class="table-wrap"><table><thead><tr><th>Sản phẩm</th><th>Danh mục</th><th>Mã</th><th>Size / Màu</th><th>Tồn kho</th><th>Đơn vị</th><th>Giá nhập TB</th><th>Giá bán</th><th>Giá trị tồn</th><th>Cập nhật</th></tr></thead><tbody id="product-table"></tbody></table></div>
+            <div class="table-wrap"><table><thead><tr><th>Sản phẩm</th><th>Danh mục</th><th>Mã</th><th>Size / Màu</th><th>Tồn kho</th><th>Đơn vị</th><th>Giá nhập TB</th><th>Phí VC</th><th>Giá vốn</th><th>Giá bán</th><th>Giá trị tồn</th><th>Thao tác</th></tr></thead><tbody id="product-table"></tbody></table></div>
           </article>
         </section>
 
@@ -244,11 +251,11 @@
           </div>
           <article class="card full-card channel-report">
             <div class="card-heading"><div><p class="eyebrow">Hiệu quả kênh bán</p><h2>Thống kê theo từng kênh</h2></div></div>
-            <div class="table-wrap"><table><thead><tr><th>Kênh bán</th><th>Số đơn</th><th>Sản phẩm bán ra</th><th>Doanh thu</th><th>Lợi nhuận</th></tr></thead><tbody id="channel-table"></tbody></table></div>
+            <div class="table-wrap"><table><thead><tr><th>Kênh bán</th><th>Số đơn</th><th>SP chính</th><th>Doanh thu</th><th>Phí sàn</th><th>Giá vốn</th><th>Lợi nhuận</th></tr></thead><tbody id="channel-table"></tbody></table></div>
           </article>
           <article class="card full-card report-detail">
             <div class="card-heading"><div><p class="eyebrow">Chi tiết kỳ báo cáo</p><h2>Các đơn hàng đã bán</h2></div></div>
-            <div class="table-wrap"><table><thead><tr><th>Thời gian</th><th>Mã đơn</th><th>Kênh</th><th>Danh mục</th><th>Mã sản phẩm</th><th>Size / Màu</th><th>Số lượng</th><th>Đơn vị</th><th>Đơn giá</th><th>Giảm giá</th><th>Thành tiền</th></tr></thead><tbody id="transaction-table"></tbody></table></div>
+            <div class="table-wrap"><table><thead><tr><th>Thời gian</th><th>Mã đơn</th><th>Kênh</th><th>Trạng thái</th><th>Sản phẩm chính</th><th>Doanh thu</th><th>Phí sàn</th><th>Giá vốn</th><th>Lợi nhuận</th></tr></thead><tbody id="transaction-table"></tbody></table></div>
           </article>
         </section>
 

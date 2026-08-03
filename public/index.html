@@ -1,0 +1,299 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#0f766e" />
+    <title>KHO HÀNG TAHA SHOES | Quản lý kho</title>
+    <link rel="icon" href="/taha-shoes-logo.jpg" />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <section class="login-screen" id="login-screen">
+      <div class="login-panel">
+        <div class="login-brand">
+          <img class="brand-logo" src="/taha-shoes-logo.jpg" alt="Logo TAHA SHOES" />
+          <div><strong>KHO HÀNG TAHA SHOES</strong><small>Quản lý thông minh</small></div>
+        </div>
+        <div class="login-copy">
+          <p class="eyebrow">Đăng nhập hệ thống</p>
+          <h1>Chào mừng đến TAHA SHOES</h1>
+          <p>Sử dụng tài khoản admin hoặc quản lý đã được cấp để tiếp tục.</p>
+        </div>
+        <form id="login-form" class="login-form">
+          <label>Tên đăng nhập<input required name="login" autocomplete="username" maxlength="80" placeholder="Nhập tên đăng nhập hoặc số điện thoại" /></label>
+          <label>Mật khẩu
+            <span class="password-field">
+              <input id="login-password" required name="password" type="password" autocomplete="current-password" placeholder="Nhập mật khẩu" minlength="6" />
+              <button class="password-toggle" type="button" data-toggle-password="login-password" aria-label="Hiện mật khẩu" title="Hiện mật khẩu">◉</button>
+            </span>
+          </label>
+          <p class="form-error hidden" id="login-error"></p>
+          <button class="button button-primary" type="submit">Đăng nhập</button>
+        </form>
+        <p class="login-footnote">Tài khoản được bảo vệ bằng mật khẩu mã hóa và phiên đăng nhập riêng.</p>
+      </div>
+      <div class="login-visual">
+        <div class="visual-card"><span class="visual-icon">↗</span><strong>Quản lý mọi kênh bán</strong><small>Facebook · Zalo · TikTok · Sàn TMĐT</small></div>
+        <blockquote>“Tồn kho, doanh thu và lợi nhuận — tất cả trong một màn hình.”</blockquote>
+      </div>
+    </section>
+
+    <div class="app-shell hidden" id="app-shell">
+      <aside class="sidebar">
+        <a class="brand" href="#dashboard" aria-label="KHO HÀNG TAHA SHOES">
+          <img class="brand-logo" src="/taha-shoes-logo.jpg" alt="" />
+          <span>KHO HÀNG<small>TAHA SHOES</small></span>
+        </a>
+        <nav class="nav" aria-label="Điều hướng chính">
+          <button class="nav-link active" data-view="dashboard">Tổng quan</button>
+          <button class="nav-link" data-view="goods">Nhập hàng</button>
+          <button class="nav-link" data-view="sales">Xuất hàng</button>
+          <button class="nav-link" data-view="orders">Đơn hàng</button>
+          <button class="nav-link" data-view="inventory">Tồn kho</button>
+          <button class="nav-link" data-view="reports">Báo cáo</button>
+          <button class="nav-link admin-only hidden" data-view="managers">Tài khoản quản lý</button>
+        </nav>
+        <div class="sidebar-footer">Dữ liệu được lưu an toàn trên máy chủ của bạn.</div>
+      </aside>
+
+      <main class="main-content">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow" id="today"></p>
+            <h1 id="page-title">Tổng quan kho hàng</h1>
+          </div>
+          <div class="user-actions">
+            <div class="user-badge"><span class="user-avatar">A</span><span><strong id="current-phone"></strong><small id="current-role"></small></span></div>
+            <button class="button button-ghost" id="logout-button">Đăng xuất</button>
+          </div>
+        </header>
+
+        <section class="view active" id="dashboard-view">
+          <div class="metric-grid" id="dashboard-metrics"></div>
+          <div class="analytics-grid dashboard-analytics">
+            <article class="card chart-card">
+              <div class="card-heading"><div><p class="eyebrow">Biểu đồ tròn · Toàn thời gian</p><h2>Tỷ trọng đơn theo kênh</h2></div></div>
+              <div class="chart-stage" id="dashboard-channel-chart"></div>
+            </article>
+            <article class="card chart-card">
+              <div class="card-heading"><div><p class="eyebrow">Biểu đồ cột · Toàn thời gian</p><h2>Sản phẩm bán ra nhiều nhất</h2></div></div>
+              <div class="chart-stage" id="dashboard-product-chart"></div>
+            </article>
+            <article class="card chart-card">
+              <div class="card-heading"><div><p class="eyebrow">Biểu đồ cột · Tồn kho hiện tại</p><h2>Sản phẩm còn nhiều nhất</h2></div></div>
+              <div class="chart-stage" id="dashboard-inventory-chart"></div>
+            </article>
+          </div>
+          <div class="content-grid dashboard-grid">
+            <article class="card">
+              <div class="card-heading"><div><p class="eyebrow">Cảnh báo</p><h2>Sản phẩm sắp hết</h2></div><button class="text-button" data-go="inventory">Xem tồn kho</button></div>
+              <div id="low-stock" class="compact-list"></div>
+            </article>
+            <article class="card">
+              <div class="card-heading"><div><p class="eyebrow">Nhật ký</p><h2>Giao dịch gần đây</h2></div><button class="text-button" data-go="reports">Xem báo cáo</button></div>
+              <div id="recent-transactions" class="compact-list"></div>
+            </article>
+          </div>
+        </section>
+
+        <section class="view" id="goods-view">
+          <article class="card category-quick-card">
+            <form id="category-form" class="category-quick-form">
+              <input required name="name" maxlength="80" aria-label="Tên danh mục mới" placeholder="Nhập tên danh mục hàng hóa mới" />
+              <button class="button button-primary" type="submit" disabled>THÊM DANH MỤC MỚI</button>
+            </form>
+          </article>
+          <article class="card product-entry-card">
+            <div class="card-heading"><div><p class="eyebrow">Hàng hóa nhập kho</p><h2>Nhập hàng</h2></div></div>
+            <p class="form-guidance">Chọn danh mục để hệ thống tự hiển thị đúng trường và đơn vị. Nhập lại mã đã có sẽ cộng thêm số lượng vào tồn kho.</p>
+            <form id="new-product-form" class="form-grid-inner product-entry-form">
+              <label class="form-wide">Danh mục hàng hóa
+                <select required name="categoryId"><option value="">Chọn danh mục</option></select>
+              </label>
+              <label>Mã sản phẩm<input required name="code" class="uppercase-input" placeholder="VD: GIAY-001" maxlength="50" /></label>
+              <label id="new-product-size-field" class="hidden" data-product-field="size">Size<input name="size" maxlength="50" placeholder="VD: 38" /></label>
+              <label id="new-product-color-field" class="hidden" data-product-field="color">Màu sắc <span class="optional">(không bắt buộc)</span><input name="color" maxlength="80" placeholder="VD: Đen" /></label>
+              <label>Số lượng<input required name="quantity" type="number" min="1" step="1" placeholder="0" /></label>
+              <label>Đơn vị
+                <select required name="unit" disabled><option value="">Chọn danh mục trước</option></select>
+              </label>
+              <label>Giá nhập <small class="price-note" id="new-product-price-note"></small><input required name="costPrice" inputmode="numeric" data-money-input placeholder="0" /></label>
+              <label id="new-product-shipping-field" class="hidden" data-product-field="shippingCost">Phí vận chuyển / đơn vị<input name="shippingCost" inputmode="numeric" data-money-input value="0" placeholder="0" /></label>
+              <label id="new-product-sale-price-field" class="hidden" data-product-field="salePrice">Giá bán <span class="optional">(không bắt buộc)</span><input name="salePrice" inputmode="numeric" data-money-input placeholder="Có thể cập nhật khi xuất hàng" /></label>
+              <label id="new-product-image-field" class="image-field hidden" data-product-field="image">Hình ảnh <span class="optional">(không bắt buộc)</span><input id="product-image-input" name="imageFile" type="file" accept="image/jpeg,image/png,image/webp" /></label>
+              <div class="image-preview hidden" id="image-preview"><img alt="Ảnh sản phẩm xem trước" /><button type="button" class="text-button" id="remove-image">Xóa ảnh</button></div>
+              <button class="button button-primary form-submit-wide" type="submit">NHẬP HÀNG</button>
+            </form>
+          </article>
+          <article class="card full-card history-card">
+            <div class="card-heading"><div><p class="eyebrow">Nhật ký kho</p><h2>Lịch sử nhập hàng</h2></div></div>
+            <div class="table-wrap"><table><thead><tr><th>Thời gian</th><th>Người nhập</th><th>Sản phẩm</th><th>Mã</th><th>Size / Màu</th><th>Số lượng</th><th>Đơn vị</th><th>Giá nhập</th><th>Phí VC</th><th>Giá vốn nhập</th></tr></thead><tbody id="receipt-history-table"></tbody></table></div>
+          </article>
+        </section>
+
+        <section class="view" id="sales-view">
+          <article class="card sales-note sales-note-compact">
+            <div class="sales-note-copy">
+              <p class="eyebrow">Tự động cập nhật</p><h2>Tồn kho luôn chính xác</h2>
+              <p>Facebook/Zalo/Website tự tạo mã và yêu cầu thông tin giao hàng; TikTok/Shopee/Lazada nhập mã đơn từ sàn. Đơn Giày tự thêm đầy đủ sản phẩm đi kèm.</p>
+            </div>
+            <div class="channel-cloud"><span>Facebook</span><span>Zalo</span><span>TikTok</span><span>Shopee</span><span>Website</span><span>Lazada</span></div>
+          </article>
+          <article class="card sales-builder">
+            <div class="card-heading sales-builder-heading">
+              <div><p class="eyebrow">Bán hàng theo lô</p><h2>Xuất nhiều đơn hàng cùng lúc</h2></div>
+              <span class="sales-builder-limit">Tối đa 20 đơn / lần</span>
+            </div>
+            <form id="sale-form" class="sales-form">
+              <div class="sale-channel-step">
+                <span class="sale-step-number">1</span>
+                <label>Kênh bán hàng <span class="required-star">*</span>
+                  <select required name="channel">
+                    <option value="">Chọn kênh bán trước</option>
+                    <option value="facebook">Facebook</option>
+                    <option value="zalo">Zalo</option>
+                    <option value="tiktok">TikTok</option>
+                    <option value="shopee">Shopee</option>
+                    <option value="website">Website</option>
+                    <option value="lazada">Lazada</option>
+                  </select>
+                </label>
+                <p>Toàn bộ đơn hàng bên dưới sẽ được ghi nhận cho kênh đã chọn.</p>
+              </div>
+              <div class="sale-order-toolbar">
+                <div><span class="sale-step-number">2</span><strong>Nhập đơn hàng và sản phẩm</strong></div>
+                <button class="button button-ghost" type="button" data-sale-action="add-order">+ Thêm đơn hàng</button>
+              </div>
+              <div class="sale-orders" id="sale-orders"></div>
+              <p class="form-error hidden" id="sale-form-error"></p>
+              <div class="sale-submit-bar">
+                <span id="sale-batch-summary">1 đơn hàng · 1 dòng sản phẩm</span>
+                <button class="button button-primary" type="submit">Xác nhận xuất tất cả</button>
+              </div>
+            </form>
+          </article>
+          <article class="card full-card history-card order-history-shell">
+            <div class="card-heading order-history-heading"><div><p class="eyebrow">Nhật ký kho</p><h2>Lịch sử xuất hàng</h2></div><span class="history-help">Chỉ ghi nhận thông tin xuất kho, không thao tác trạng thái tại đây</span></div>
+            <div class="table-wrap"><table><thead><tr><th>Thời gian</th><th>Người xuất</th><th>Mã đơn</th><th>Kênh</th><th>Loại hàng</th><th>Sản phẩm</th><th>Mã SP</th><th>Số lượng</th><th>Đơn vị</th></tr></thead><tbody id="sale-history-table"></tbody></table></div>
+          </article>
+        </section>
+
+        <section class="view" id="orders-view">
+          <article class="card full-card history-card order-history-shell">
+            <div class="card-heading order-history-heading"><div><p class="eyebrow">Quản lý trạng thái</p><h2>Tất cả đơn hàng</h2></div><span class="history-help">Theo dõi và chuyển trạng thái đơn tại đây</span></div>
+            <div class="order-status-tabs" id="order-status-tabs"></div>
+            <div class="order-history-list" id="order-list"></div>
+          </article>
+        </section>
+
+        <section class="view" id="inventory-view">
+          <article class="card full-card">
+            <div class="card-heading inventory-header"><div><p class="eyebrow">Danh mục sản phẩm</p><h2>Quản lý tồn kho</h2></div><label class="search"><span>Tìm kiếm</span><input id="product-search" placeholder="Mã, danh mục, size hoặc màu" /></label></div>
+            <div class="table-wrap"><table><thead><tr><th>Sản phẩm</th><th>Danh mục</th><th>Mã</th><th>Size / Màu</th><th>Tồn kho</th><th>Đơn vị</th><th>Giá nhập TB</th><th>Phí VC</th><th>Giá vốn</th><th>Giá bán</th><th>Giá trị tồn</th><th>Thao tác</th></tr></thead><tbody id="product-table"></tbody></table></div>
+          </article>
+        </section>
+
+        <section class="view" id="reports-view">
+          <article class="card report-filter">
+            <div><p class="eyebrow">Khoảng thống kê</p><h2 id="report-range-label">Báo cáo hôm nay</h2></div>
+            <div class="period-tabs"><button class="period-button active" data-period="day">Theo ngày</button><button class="period-button" data-period="week">Theo tuần</button><button class="period-button" data-period="month">Theo tháng</button></div>
+            <label class="date-filter">Chọn ngày<input id="report-anchor" type="date" /></label>
+          </article>
+          <div class="metric-grid report-metrics" id="report-metrics"></div>
+          <div class="analytics-grid report-analytics">
+            <article class="card chart-card">
+              <div class="card-heading"><div><p class="eyebrow">Biểu đồ tròn · So sánh số đơn</p><h2>Tỷ trọng kênh bán nhiều nhất và ít nhất</h2></div></div>
+              <div class="chart-stage" id="report-channel-chart"></div>
+            </article>
+            <article class="card chart-card">
+              <div class="card-heading"><div><p class="eyebrow">Biểu đồ cột · Xếp hạng số lượng</p><h2>Sản phẩm bán nhiều nhất</h2></div></div>
+              <div class="chart-stage" id="report-product-chart"></div>
+            </article>
+          </div>
+          <article class="card full-card channel-report">
+            <div class="card-heading"><div><p class="eyebrow">Hiệu quả kênh bán</p><h2>Thống kê theo từng kênh</h2></div></div>
+            <div class="table-wrap"><table><thead><tr><th>Kênh bán</th><th>Số đơn</th><th>SP chính</th><th>Doanh thu</th><th>Phí bán hàng</th><th>Giá vốn</th><th>Lợi nhuận</th></tr></thead><tbody id="channel-table"></tbody></table></div>
+          </article>
+          <article class="card full-card report-detail">
+            <div class="card-heading"><div><p class="eyebrow">Chi tiết kỳ báo cáo</p><h2>Các đơn hàng đã bán</h2></div></div>
+            <div class="table-wrap"><table><thead><tr><th>Thời gian</th><th>Mã đơn</th><th>Kênh</th><th>Trạng thái</th><th>Sản phẩm chính</th><th>Doanh thu</th><th>Phí bán hàng</th><th>Giá vốn</th><th>Lợi nhuận</th></tr></thead><tbody id="transaction-table"></tbody></table></div>
+          </article>
+        </section>
+
+        <section class="view admin-only hidden" id="managers-view">
+          <div class="content-grid manager-grid">
+            <article class="card">
+              <div class="card-heading"><div><p class="eyebrow">Phân quyền</p><h2 id="manager-form-title">Thêm tài khoản quản lý</h2></div><span class="manager-limit" id="manager-limit">0/5</span></div>
+              <form id="manager-form" class="manager-form" novalidate>
+                <label><span class="field-label">Tên người quản lý <span class="required-mark" aria-hidden="true">*</span></span><input required name="name" maxlength="120" placeholder="VD: Nguyễn Văn An" /></label>
+                <label><span class="field-label">Số điện thoại <span class="required-mark" aria-hidden="true">*</span></span><input required name="phone" inputmode="numeric" autocomplete="tel" maxlength="10" pattern="0[0-9]{9}" placeholder="VD: 0912345678" /></label>
+                <label><span class="field-label">Mật khẩu <span class="required-mark" id="manager-password-star" aria-hidden="true">*</span> <span class="optional" id="manager-password-note">(tối thiểu 6 ký tự, có ký tự đặc biệt)</span></span>
+                  <span class="password-field">
+                    <input id="manager-password" required name="password" type="password" autocomplete="new-password" placeholder="Nhập mật khẩu" minlength="6" />
+                    <button class="password-toggle" type="button" data-toggle-password="manager-password" aria-label="Hiện mật khẩu" title="Hiện mật khẩu">◉</button>
+                  </span>
+                </label>
+                <p class="form-error hidden" id="manager-form-error"></p>
+                <div class="form-actions"><button class="button button-primary" type="submit">Thêm quản lý</button><button class="button button-ghost hidden" type="button" id="cancel-manager-edit">Hủy sửa</button></div>
+              </form>
+            </article>
+            <article class="card admin-password-card">
+              <div class="card-heading"><div><p class="eyebrow">Bảo mật admin</p><h2>Thay đổi mật khẩu</h2></div></div>
+              <form id="admin-password-form" class="manager-form" novalidate>
+                <label>Mật khẩu hiện tại
+                  <span class="password-field">
+                    <input id="admin-current-password" required name="currentPassword" type="password" autocomplete="current-password" minlength="8" />
+                    <button class="password-toggle" type="button" data-toggle-password="admin-current-password" aria-label="Hiện mật khẩu" title="Hiện mật khẩu">◉</button>
+                  </span>
+                </label>
+                <label>Mật khẩu mới <span class="optional">(tối thiểu 8 ký tự)</span>
+                  <span class="password-field">
+                    <input id="admin-new-password" required name="newPassword" type="password" autocomplete="new-password" minlength="8" />
+                    <button class="password-toggle" type="button" data-toggle-password="admin-new-password" aria-label="Hiện mật khẩu" title="Hiện mật khẩu">◉</button>
+                  </span>
+                </label>
+                <label>Xác nhận mật khẩu mới
+                  <span class="password-field">
+                    <input id="admin-confirm-password" required name="confirmPassword" type="password" autocomplete="new-password" minlength="8" />
+                    <button class="password-toggle" type="button" data-toggle-password="admin-confirm-password" aria-label="Hiện mật khẩu" title="Hiện mật khẩu">◉</button>
+                  </span>
+                </label>
+                <p class="form-error hidden" id="admin-password-error"></p>
+                <button class="button button-primary" type="submit">Cập nhật mật khẩu admin</button>
+              </form>
+            </article>
+          </div>
+          <article class="card full-card admin-data-reset-card">
+            <div class="card-heading"><div><p class="eyebrow">Vùng thao tác nguy hiểm</p><h2>Xóa dữ liệu nhập hàng, xuất hàng và lịch sử</h2></div><span class="danger-badge">Chỉ admin</span></div>
+            <div class="admin-data-reset-layout">
+              <div class="admin-data-reset-copy">
+                <p>Thao tác này sẽ xóa toàn bộ sản phẩm và tồn kho, lịch sử nhập hàng, đơn xuất, lịch sử xuất hàng và lịch sử chỉnh tồn.</p>
+                <p><strong>Tài khoản đăng nhập và các danh mục hàng hóa vẫn được giữ nguyên.</strong> Dữ liệu đã xóa không thể khôi phục trực tiếp trên website.</p>
+              </div>
+              <form id="admin-data-reset-form" class="admin-data-reset-form" novalidate>
+                <label><span class="field-label">Nhập mật khẩu admin để xác nhận</span>
+                  <span class="password-field">
+                    <input id="admin-data-reset-password" required name="password" type="password" autocomplete="current-password" minlength="8" placeholder="Mật khẩu admin hiện tại" />
+                    <button class="password-toggle" type="button" data-toggle-password="admin-data-reset-password" aria-label="Hiện mật khẩu" title="Hiện mật khẩu">◉</button>
+                  </span>
+                </label>
+                <label class="danger-confirm"><input name="confirmed" type="checkbox" /> <span>Tôi hiểu dữ liệu nhập, xuất và lịch sử sẽ bị xóa vĩnh viễn.</span></label>
+                <p class="form-error hidden" id="admin-data-reset-error"></p>
+                <button class="button button-danger" id="admin-data-reset-button" type="submit" disabled>XÓA TOÀN BỘ DỮ LIỆU</button>
+              </form>
+            </div>
+          </article>
+          <article class="card full-card manager-table-card">
+            <div class="card-heading"><div><p class="eyebrow">Danh sách tài khoản</p><h2>Quản lý đang hoạt động</h2></div></div>
+            <div class="table-wrap"><table><thead><tr><th>Tên người quản lý</th><th>Số điện thoại</th><th>Vai trò</th><th>Ngày tạo</th><th>Cập nhật</th><th>Thao tác</th></tr></thead><tbody id="manager-table"></tbody></table></div>
+          </article>
+        </section>
+      </main>
+    </div>
+
+    <datalist id="product-codes"></datalist>
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

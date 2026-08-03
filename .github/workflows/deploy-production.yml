@@ -1,0 +1,230 @@
+name: Deploy production
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: quanlykho-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Backup and deploy VPS
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      VPS_HOST: ${{ secrets.VPS_HOST }}
+      VPS_PORT: ${{ secrets.VPS_PORT }}
+      VPS_USER: ${{ secrets.VPS_USER }}
+      VPS_PROJECT_PATH: ${{ secrets.VPS_PROJECT_PATH }}
+      VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+      APP_ADMIN_LOGIN: ${{ secrets.APP_ADMIN_LOGIN }}
+      APP_ADMIN_PASSWORD: ${{ secrets.APP_ADMIN_PASSWORD }}
+
+    steps:
+      - name: Validate deployment target
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$VPS_HOST" = "14.225.254.65"
+          test "$VPS_PORT" = "22"
+          test "$VPS_USER" = "root"
+          test "$VPS_PROJECT_PATH" = "/opt/quanlykho"
+          test -n "$VPS_SSH_KEY"
+          test -n "$APP_ADMIN_LOGIN"
+          test -n "$APP_ADMIN_PASSWORD"
+
+      - name: Configure SSH
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh_dir="$RUNNER_TEMP/quanlykho-ssh"
+          install -d -m 700 "$ssh_dir"
+          printf '%s\n' "$VPS_SSH_KEY" > "$ssh_dir/id_ed25519"
+          chmod 600 "$ssh_dir/id_ed25519"
+          ssh-keyscan -T 15 -p "$VPS_PORT" -H "$VPS_HOST" > "$ssh_dir/known_hosts"
+          test -s "$ssh_dir/known_hosts"
+          chmod 600 "$ssh_dir/known_hosts"
+
+      - name: Deploy with database backup and rollback
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh_dir="$RUNNER_TEMP/quanlykho-ssh"
+          admin_login_b64="$(printf '%s' "$APP_ADMIN_LOGIN" | base64 -w 0)"
+          admin_password_b64="$(printf '%s' "$APP_ADMIN_PASSWORD" | base64 -w 0)"
+          admin_credentials_version="$(printf '%s\0%s' "$APP_ADMIN_LOGIN" "$APP_ADMIN_PASSWORD" | sha256sum | cut -d ' ' -f 1)"
+          echo "::add-mask::$admin_login_b64"
+          echo "::add-mask::$admin_password_b64"
+          echo "::add-mask::$admin_credentials_version"
+          ssh \
+            -i "$ssh_dir/id_ed25519" \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$ssh_dir/known_hosts" \
+            -p "$VPS_PORT" \
+            "$VPS_USER@$VPS_HOST" \
+            "bash -s -- '$VPS_PROJECT_PATH' '$GITHUB_SHA' '$admin_login_b64' '$admin_password_b64' '$admin_credentials_version'" <<'REMOTE_SCRIPT'
+          set -euo pipefail
+
+          project_path="$1"
+          target_sha="$2"
+          admin_login="$(printf '%s' "$3" | base64 --decode)"
+          admin_password="$(printf '%s' "$4" | base64 --decode)"
+          admin_credentials_version="$5"
+          export ADMIN_LOGIN="$admin_login"
+          export ADMIN_PASSWORD="$admin_password"
+          export ADMIN_CREDENTIALS_VERSION="$admin_credentials_version"
+          export APP_VERSION="$target_sha"
+          repository_url="https://github.com/tahashoes/quanlykho.git"
+          compose_file="compose.production.yaml"
+          service_name="quanlykho"
+          database_path="data/quanlykho.db"
+
+          if docker compose version > /dev/null 2>&1; then
+            compose_command=(docker compose)
+          elif command -v docker-compose > /dev/null 2>&1; then
+            compose_command=(docker-compose)
+          else
+            echo "Docker Compose is not installed on the VPS."
+            exit 1
+          fi
+
+          compose() {
+            "${compose_command[@]}" -f "$compose_file" "$@"
+          }
+          echo "COMPOSE_COMMAND=${compose_command[*]}"
+
+          test "$project_path" = "/opt/quanlykho"
+          cd "$project_path"
+          test -d .git
+          test -f "$compose_file"
+          test -f .env
+
+          if test -n "$(git status --porcelain --untracked-files=no)"; then
+            echo "Tracked files on the VPS have local changes; deployment stopped."
+            git status --short
+            exit 1
+          fi
+
+          previous_sha="$(git rev-parse HEAD)"
+          git fetch --no-tags "$repository_url" agent/inventory-management-app
+          fetched_sha="$(git rev-parse FETCH_HEAD)"
+          if test "$fetched_sha" != "$target_sha"; then
+            echo "Fetched SHA $fetched_sha does not match workflow SHA $target_sha."
+            exit 1
+          fi
+
+          git switch --detach "$target_sha"
+          compose config --quiet
+          compose build
+
+          backup_stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+          backup_dir="$project_path/backups/$backup_stamp"
+          mkdir -p "$backup_dir"
+
+          compose stop "$service_name"
+          database_backed_up=0
+          if test -f "$database_path"; then
+            if ! cp -a "$database_path" "$backup_dir/quanlykho.db"; then
+              compose start "$service_name"
+              exit 1
+            fi
+            for sidecar_path in "$database_path-wal" "$database_path-shm"; do
+              if test -f "$sidecar_path"; then
+                cp -a "$sidecar_path" "$backup_dir/"
+              fi
+            done
+            database_backed_up=1
+            echo "BACKUP_DIR=$backup_dir"
+          fi
+
+          rollback_deployment() {
+            set +e
+            echo "Deployment failed; restoring commit $previous_sha and database backup."
+            compose stop "$service_name"
+            if test "$database_backed_up" = "1"; then
+              rm -f "$database_path-wal" "$database_path-shm"
+              cp -a "$backup_dir/quanlykho.db" "$database_path"
+              for backup_sidecar in "$backup_dir/quanlykho.db-wal" "$backup_dir/quanlykho.db-shm"; do
+                if test -f "$backup_sidecar"; then
+                  cp -a "$backup_sidecar" data/
+                fi
+              done
+            fi
+            git switch --detach "$previous_sha"
+            compose build
+            compose up -d
+            compose ps
+            exit 1
+          }
+
+          if ! compose up -d; then
+            rollback_deployment
+          fi
+
+          health_status=""
+          for attempt in $(seq 1 60); do
+            health_status="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$service_name" 2>/dev/null || true)"
+            if test "$health_status" = "healthy"; then
+              break
+            fi
+            sleep 2
+          done
+
+          if test "$health_status" != "healthy"; then
+            compose logs --tail=120 "$service_name"
+            rollback_deployment
+          fi
+
+          compose ps
+          echo "DEPLOYED_SHA=$(git rev-parse HEAD)"
+          REMOTE_SCRIPT
+
+      - name: Verify deployed version and critical UI
+        shell: bash
+        run: |
+          set -euo pipefail
+          base_url="https://tahashoes.one"
+          health_file="$RUNNER_TEMP/quanlykho-health.json"
+          index_file="$RUNNER_TEMP/quanlykho-index.html"
+          app_file="$RUNNER_TEMP/quanlykho-app.js"
+
+          curl --fail --silent --show-error \
+            --retry 12 \
+            --retry-delay 5 \
+            --retry-all-errors \
+            "$base_url/api/health" \
+            --output "$health_file"
+
+          EXPECTED_SHA="$GITHUB_SHA" node - "$health_file" <<'NODE'
+          const { readFileSync } = require("node:fs");
+          const health = JSON.parse(readFileSync(process.argv[2], "utf8"));
+          if (health.ok !== true) {
+            throw new Error("Public health check did not return ok=true.");
+          }
+          if (health.version !== process.env.EXPECTED_SHA) {
+            throw new Error(`Expected ${process.env.EXPECTED_SHA}, received ${health.version}.`);
+          }
+          NODE
+
+          curl --fail --silent --show-error \
+            --retry 12 \
+            --retry-delay 5 \
+            --retry-all-errors \
+            "$base_url/?version=$GITHUB_SHA" \
+            --output "$index_file"
+          curl --fail --silent --show-error \
+            --retry 12 \
+            --retry-delay 5 \
+            --retry-all-errors \
+            "$base_url/app.js?version=$GITHUB_SHA" \
+            --output "$app_file"
+
+          grep --fixed-strings --quiet 'name="login"' "$index_file"
+          grep --fixed-strings --quiet 'data-sale-stock-note' "$app_file"
+          grep --fixed-strings --quiet 'data-draft-cogs-breakdown' "$app_file"
+          echo "Production is serving commit $GITHUB_SHA with the expected UI."

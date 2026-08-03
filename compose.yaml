@@ -1,0 +1,17 @@
+services:
+  quanlykho:
+    build: .
+    container_name: quanlykho
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "3000:3000"
+    environment:
+      PORT: "3000"
+      DB_PATH: /app/data/quanlykho.db
+      TZ: Asia/Ho_Chi_Minh
+      COOKIE_SECURE: "${COOKIE_SECURE:-false}"
+      APP_VERSION: "${APP_VERSION:-local}"
+    volumes:
+      - ./data:/app/data

@@ -1,0 +1,37 @@
+services:
+  quanlykho:
+    build:
+      context: .
+    image: tahashoes/quanlykho:latest
+    container_name: quanlykho
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      PORT: "3000"
+      DB_PATH: /app/data/quanlykho.db
+      TZ: Asia/Ho_Chi_Minh
+      COOKIE_SECURE: "true"
+      APP_VERSION: "${APP_VERSION:-unknown}"
+      ADMIN_LOGIN: "${ADMIN_LOGIN:-}"
+      ADMIN_PASSWORD: "${ADMIN_PASSWORD:-}"
+      ADMIN_CREDENTIALS_VERSION: "${ADMIN_CREDENTIALS_VERSION:-}"
+    volumes:
+      - ./data:/app/data
+    networks:
+      - tahashoes
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - fetch('http://127.0.0.1:3000/api/health').then(async r=>{const b=await r.json();if(!r.ok||b.ok!==true)process.exit(1)}).catch(()=>process.exit(1))
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+networks:
+  tahashoes:
+    external: true
+    name: tahashoes_default

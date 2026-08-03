@@ -113,6 +113,21 @@ function text(value) {
   })[char]);
 }
 
+const filledFieldSelector = [
+  "input:not([type='checkbox']):not([type='radio']):not([type='file'])",
+  "select",
+  "textarea"
+].join(",");
+
+function syncFilledField(field) {
+  if (!field?.matches?.(filledFieldSelector)) return;
+  field.classList.toggle("has-value", String(field.value ?? "").trim() !== "");
+}
+
+function syncFilledFields(root = document) {
+  root.querySelectorAll(filledFieldSelector).forEach(syncFilledField);
+}
+
 function categoryById(id) {
   return state.categories.find((category) => category.id === Number(id));
 }
@@ -255,7 +270,7 @@ function showApp(user) {
   $("#login-screen").classList.add("hidden");
   $("#app-shell").classList.remove("hidden");
   $("#current-phone").textContent = user.name;
-  $("#current-role").textContent = `${user.role === "admin" ? "Quản trị viên" : "Quản lý"} · ${user.phone}`;
+  $("#current-role").textContent = `${user.role === "admin" ? "Quản trị viên" : "Quản lý"} · ${user.login || user.phone}`;
   $(".user-avatar").textContent = user.role === "admin" ? "A" : "Q";
   document.querySelectorAll(".admin-only").forEach((element) => {
     element.classList.toggle("hidden", user.role !== "admin");
@@ -509,7 +524,7 @@ function saleItemTemplate() {
     <div class="sale-item-main">
       <label><span class="sale-field-title">Danh mục <b>*</b></span><select data-sale-field="categoryId">${saleCategoryOptions()}</select></label>
       <label class="sale-product-code"><span class="sale-field-title">Mã sản phẩm <b>*</b></span><select data-sale-field="code" disabled><option value="">Chọn danh mục trước</option></select></label>
-      <div class="sale-product-preview" data-sale-preview><span class="sale-preview-placeholder">?</span><span><strong>Chưa chọn sản phẩm</strong><small>Chọn danh mục rồi chọn mã hàng</small></span></div>
+      <div class="sale-product-preview" data-sale-preview><span class="sale-preview-placeholder">?</span><span><strong>Chưa chọn sản phẩm</strong><small>Chọn danh mục rồi chọn mã hàng</small><small class="sale-stock-note" data-sale-stock-note aria-live="polite">Tồn kho sẽ hiện sau khi chọn</small></span></div>
       <label><span class="sale-field-title">Số lượng <b>*</b></span><input data-sale-field="quantity" type="number" min="1" step="1" value="1" /></label>
       <label><span class="sale-field-title">Giá bán <b>*</b></span><input data-sale-field="salePrice" inputmode="numeric" data-money-input placeholder="0" /></label>
       <div class="sale-line-total"><span>Thành tiền dự kiến</span><strong data-sale-total>${money.format(0)}</strong></div>
@@ -537,7 +552,7 @@ function saleOrderTemplate(orderCode = generateSaleOrderCode()) {
       <div class="sale-draft-finances">
         <span><small>DOANH THU</small><strong data-draft-revenue>${money.format(0)}</strong></span>
         <label class="sale-finance-fee"><small>PHÍ SÀN · <b data-sale-fee-channel>KÊNH ĐÃ CHỌN</b></small><input aria-label="Phí sàn" data-sale-field="platformFee" inputmode="numeric" data-money-input value="0" /><em data-sale-fee-percent>0% doanh thu</em></label>
-        <span><small>GIÁ VỐN</small><strong data-draft-cogs>${money.format(0)}</strong></span>
+        <span class="sale-finance-cogs"><small>GIÁ VỐN</small><strong data-draft-cogs>${money.format(0)}</strong><em class="sale-cogs-breakdown" data-draft-cogs-breakdown>Chưa có dữ liệu giá vốn</em></span>
         <span class="profit"><small>LỢI NHUẬN</small><strong data-draft-profit>${money.format(0)}</strong></span>
       </div>
     </div>
@@ -565,20 +580,27 @@ function updateOrderFinancials(order) {
   let revenue = 0;
   let cogs = 0;
   let shoeUnits = 0;
+  const cogsParts = [];
   order.querySelectorAll("[data-sale-item]").forEach((item) => {
     const product = findProduct(item.querySelector("[data-sale-field='code']").value);
     const quantity = Math.max(0, Number(item.querySelector("[data-sale-field='quantity']").value) || 0);
     const price = Math.max(0, parseMoney(item.querySelector("[data-sale-field='salePrice']").value) || 0);
     revenue += quantity * price;
     if (product) {
-      cogs += quantity * product.landedCost;
+      const lineCogs = quantity * product.landedCost;
+      cogs += lineCogs;
+      if (quantity > 0) {
+        cogsParts.push({ label: product.name, amount: lineCogs });
+      }
       if (product.categoryName === "Giày") shoeUnits += quantity;
     }
   });
   if (shoeUnits > 0) {
     for (const addon of state.salesConfig.addons) {
       const quantity = addon.perOrder ? addon.quantity : addon.quantity * shoeUnits;
-      cogs += quantity * addon.price;
+      const addonCogs = quantity * addon.price;
+      cogs += addonCogs;
+      cogsParts.push({ label: addon.categoryName, amount: addonCogs });
     }
   }
   const feeInput = order.querySelector("[data-sale-field='platformFee']");
@@ -586,6 +608,9 @@ function updateOrderFinancials(order) {
   const profit = revenue - fee - cogs;
   order.querySelector("[data-draft-revenue]").textContent = money.format(revenue);
   order.querySelector("[data-draft-cogs]").textContent = money.format(cogs);
+  order.querySelector("[data-draft-cogs-breakdown]").textContent = cogsParts.length
+    ? cogsParts.map((part) => `${part.label} ${money.format(part.amount)}`).join(" + ")
+    : "Chưa có dữ liệu giá vốn";
   order.querySelector("[data-draft-profit]").textContent = money.format(profit);
   order.querySelector("[data-sale-fee-percent]").textContent = `${revenue > 0 ? (fee * 100 / revenue).toLocaleString("vi-VN", { maximumFractionDigits: 2 }) : "0"}% doanh thu`;
 }
@@ -616,9 +641,35 @@ function updateSaleBuilderSummary() {
       item.querySelector("[data-sale-action='remove-item']").disabled = !channelReady || items.length === 1;
     });
     updateOrderFinancials(order);
+    syncFilledFields(order);
   });
   const itemCount = document.querySelectorAll("[data-sale-item]").length;
   $("#sale-batch-summary").textContent = `${orders.length} đơn hàng · ${itemCount} sản phẩm chính`;
+}
+
+function updateSaleStockStatus(item, product) {
+  const quantityInput = item.querySelector("[data-sale-field='quantity']");
+  const stockNote = item.querySelector("[data-sale-stock-note]");
+  const quantity = Number(quantityInput.value);
+  if (!product) {
+    quantityInput.removeAttribute("max");
+    quantityInput.classList.remove("stock-insufficient");
+    quantityInput.setAttribute("aria-invalid", "false");
+    stockNote.classList.remove("error");
+    stockNote.textContent = "Tồn kho sẽ hiện sau khi chọn";
+    return true;
+  }
+
+  const stock = Math.max(0, Number(product.stock) || 0);
+  const insufficient = Number.isFinite(quantity) && quantity > stock;
+  quantityInput.max = String(stock);
+  quantityInput.classList.toggle("stock-insufficient", insufficient);
+  quantityInput.setAttribute("aria-invalid", String(insufficient));
+  stockNote.classList.toggle("error", insufficient);
+  stockNote.textContent = insufficient
+    ? `Tồn không đủ · còn ${stock.toLocaleString("vi-VN")} ${product.unit}`
+    : `Tồn: ${stock.toLocaleString("vi-VN")} ${product.unit}`;
+  return !insufficient;
 }
 
 function updateSaleItem(item, prefillPrice = false) {
@@ -632,7 +683,7 @@ function updateSaleItem(item, prefillPrice = false) {
   if (product) {
     if (prefillPrice) priceInput.value = formatMoneyInputValue(product.salePrice);
     const visual = product.image ? `<img src="${product.image}" alt="" />` : `<span class="sale-preview-placeholder">${text(product.name.slice(0, 1).toUpperCase())}</span>`;
-    preview.innerHTML = `${visual}<span><strong>${text(product.name)}</strong><small>${text(product.code)} · ${variantHtml(product)} · còn ${product.stock.toLocaleString("vi-VN")} ${text(product.unit)}</small></span>`;
+    preview.innerHTML = `${visual}<span><strong>${text(product.name)}</strong><small>${text(product.code)} · ${variantHtml(product)}</small><small class="sale-stock-note" data-sale-stock-note aria-live="polite"></small></span>`;
     preview.classList.add("found");
     const category = categoryById(product.categoryId);
     const sizeField = linkedFields.querySelector("[data-sale-linked='size']");
@@ -645,10 +696,11 @@ function updateSaleItem(item, prefillPrice = false) {
       product.unit === "tờ" && product.categoryName === "Giấy in" ? "Tờ (1/500 sấp)" : product.unit;
     linkedFields.classList.remove("hidden");
   } else {
-    preview.innerHTML = `<span class="sale-preview-placeholder">?</span><span><strong>Chưa chọn sản phẩm</strong><small>Chọn danh mục rồi chọn mã hàng</small></span>`;
+    preview.innerHTML = `<span class="sale-preview-placeholder">?</span><span><strong>Chưa chọn sản phẩm</strong><small>Chọn danh mục rồi chọn mã hàng</small><small class="sale-stock-note" data-sale-stock-note aria-live="polite"></small></span>`;
     preview.classList.remove("found");
     linkedFields.classList.add("hidden");
   }
+  updateSaleStockStatus(item, product);
   const quantity = Math.max(0, Number(quantityInput.value) || 0);
   const price = Math.max(0, parseMoney(priceInput.value) || 0);
   item.querySelector("[data-sale-total]").textContent = money.format(quantity * price);
@@ -663,6 +715,7 @@ function updateSaleItem(item, prefillPrice = false) {
     addonPreview.classList.add("hidden");
   }
   const order = item.closest("[data-sale-order]");
+  syncFilledFields(item);
   if (order) updateOrderFinancials(order);
 }
 
@@ -911,20 +964,26 @@ document.addEventListener("input", (event) => {
   if (event.target.matches(".uppercase-input")) {
     event.target.value = event.target.value.toUpperCase();
   }
+  syncFilledField(event.target);
+});
+
+document.addEventListener("change", (event) => syncFilledField(event.target));
+document.addEventListener("reset", (event) => {
+  requestAnimationFrame(() => syncFilledFields(event.target));
 });
 
 $("#login-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   const form = event.currentTarget;
   const errorElement = $("#login-error");
-  const phone = String(form.elements.phone.value).replace(/[\s.-]/g, "");
+  const login = String(form.elements.login.value).trim();
   const password = form.elements.password.value;
   errorElement.classList.add("hidden");
   errorElement.textContent = "";
-  if (!/^\+?\d{8,15}$/.test(phone)) {
-    errorElement.textContent = "Số điện thoại phải có từ 8 đến 15 chữ số.";
+  if (login.length < 3 || login.length > 80) {
+    errorElement.textContent = "Tên đăng nhập phải có từ 3 đến 80 ký tự.";
     errorElement.classList.remove("hidden");
-    form.elements.phone.focus();
+    form.elements.login.focus();
     return;
   }
   if (password.length < 6) {
@@ -1377,4 +1436,5 @@ async function initialize() {
   }
 }
 
+syncFilledFields();
 initialize();

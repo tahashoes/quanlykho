@@ -29,6 +29,7 @@ const orderStatuses = [
 const lockedOrderStatuses = new Set(["completed", "returned", "cancelled"]);
 const reversedOrderStatuses = new Set(["returned", "cancelled"]);
 const adminDataPurgeConfirmation = "DELETE_OPERATIONAL_DATA";
+const saleMainCategoryNames = new Set(["Giày", "Xịt khử mùi"]);
 const shoeBundleRules = [
   { categoryName: "Vớ", quantity: 1, unit: "đôi", price: 9_000, perOrder: false },
   { categoryName: "Xịt khử mùi", quantity: 1, unit: "chai", price: 10_000, perOrder: false },
@@ -389,12 +390,22 @@ function cleanOrderCode(value) {
   return orderCode;
 }
 
-function cleanPhone(value) {
-  const phone = String(value ?? "").replace(/[\s.-]/g, "");
-  if (!/^\+?\d{8,15}$/.test(phone)) {
-    throw new AppError("Số điện thoại phải có từ 8 đến 15 chữ số.");
+function cleanLoginIdentifier(value) {
+  const rawValue = String(value ?? "").trim();
+  const phone = rawValue.replace(/[\s.-]/g, "");
+  if (/^\+?\d{8,15}$/.test(phone)) return phone;
+
+  const login = rawValue.toLowerCase();
+  if (
+    login.length < 3 ||
+    login.length > 80 ||
+    !/^[a-z0-9][a-z0-9@._-]*$/.test(login)
+  ) {
+    throw new AppError(
+      "Tên đăng nhập phải có từ 3 đến 80 ký tự và chỉ gồm chữ, số, @, dấu chấm, gạch ngang hoặc gạch dưới."
+    );
   }
-  return phone;
+  return login;
 }
 
 function cleanPassword(value, required = true) {
@@ -531,26 +542,66 @@ function cleanDiscount(typeValue, valueValue, salePrice) {
 }
 
 function bootstrapAdmin() {
-  const existing = db.prepare("SELECT id FROM users WHERE role = 'admin' LIMIT 1").get();
-  if (existing) return;
-
-  const phone = process.env.ADMIN_PHONE || (isProduction ? "" : "0900000000");
+  const login = process.env.ADMIN_LOGIN || process.env.ADMIN_PHONE ||
+    (isProduction ? "" : "admin@tahashoes");
   const password = process.env.ADMIN_PASSWORD || (isProduction ? "" : "Admin@123");
-  if (!phone || !password) {
-    throw new Error("Thiếu ADMIN_PHONE hoặc ADMIN_PASSWORD để tạo tài khoản admin đầu tiên.");
+  if (!login || !password) {
+    throw new Error(
+      "Thiếu ADMIN_LOGIN (hoặc ADMIN_PHONE) hay ADMIN_PASSWORD để cấu hình tài khoản admin."
+    );
   }
-  const cleanAdminPhone = cleanPhone(phone);
+  const cleanAdminLogin = cleanLoginIdentifier(login);
   const cleanAdminPassword = cleanPassword(password);
+  const existing = db.prepare("SELECT id FROM users WHERE role = 'admin' LIMIT 1").get();
+  const credentialsVersion = String(process.env.ADMIN_CREDENTIALS_VERSION || "").trim();
+  const credentialsKey = credentialsVersion
+    ? `admin_credentials_${createHash("sha256").update(credentialsVersion).digest("hex").slice(0, 24)}`
+    : null;
+
+  if (existing) {
+    if (!credentialsKey || db.prepare("SELECT key FROM app_meta WHERE key = ?").get(credentialsKey)) {
+      return;
+    }
+    const passwordData = hashPassword(cleanAdminPassword);
+    const timestamp = now();
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      db.prepare(`
+        UPDATE users
+        SET phone = ?, password_hash = ?, password_salt = ?, updated_at = ?
+        WHERE id = ?
+      `).run(
+        cleanAdminLogin,
+        passwordData.hash,
+        passwordData.salt,
+        timestamp,
+        existing.id
+      );
+      db.prepare("DELETE FROM sessions WHERE user_id = ?").run(existing.id);
+      db.prepare("INSERT INTO app_meta (key, value) VALUES (?, ?)")
+        .run(credentialsKey, timestamp);
+      db.exec("COMMIT");
+    } catch (error) {
+      db.exec("ROLLBACK");
+      throw error;
+    }
+    return;
+  }
+
   const passwordData = hashPassword(cleanAdminPassword);
   const timestamp = now();
   db.prepare(`
     INSERT INTO users
       (display_name, phone, password_hash, password_salt, role, created_at, updated_at)
     VALUES ('Quản trị viên', ?, ?, ?, 'admin', ?, ?)
-  `).run(cleanAdminPhone, passwordData.hash, passwordData.salt, timestamp, timestamp);
+  `).run(cleanAdminLogin, passwordData.hash, passwordData.salt, timestamp, timestamp);
+  if (credentialsKey) {
+    db.prepare("INSERT OR IGNORE INTO app_meta (key, value) VALUES (?, ?)")
+      .run(credentialsKey, timestamp);
+  }
 
   if (!isProduction) {
-    console.log("Tài khoản chạy thử: 0900000000 / Admin@123");
+    console.log("Tài khoản chạy thử: admin@tahashoes / Admin@123");
   }
 }
 
@@ -626,6 +677,7 @@ function getCurrentUser(request) {
   return {
     id: Number(session.id),
     name: session.display_name,
+    login: session.phone,
     phone: session.phone,
     role: session.role
   };
@@ -652,11 +704,11 @@ function sendError(response, error) {
 }
 
 function login(body, response) {
-  const phone = cleanPhone(body.phone);
+  const loginIdentifier = cleanLoginIdentifier(body.login ?? body.phone);
   const password = String(body.password ?? "");
-  const user = db.prepare("SELECT * FROM users WHERE phone = ?").get(phone);
+  const user = db.prepare("SELECT * FROM users WHERE phone = ?").get(loginIdentifier);
   if (!user || !verifyPassword(password, user.password_salt, user.password_hash)) {
-    throw new AppError("Số điện thoại hoặc mật khẩu không đúng.", 401);
+    throw new AppError("Tên đăng nhập hoặc mật khẩu không đúng.", 401);
   }
   const token = randomBytes(32).toString("base64url");
   const createdAt = now();
@@ -668,6 +720,7 @@ function login(body, response) {
   return json(response, 200, {
     id: Number(user.id),
     name: user.display_name,
+    login: user.phone,
     phone: user.phone,
     role: user.role
   }, {
@@ -1084,7 +1137,9 @@ function getBundleProduct(categoryName) {
 }
 
 function salesConfigView() {
-  const allowedCategories = listCategories();
+  const allowedCategories = listCategories().filter((category) => (
+    saleMainCategoryNames.has(category.name)
+  ));
   const addons = shoeBundleRules.map((rule) => {
     const product = getBundleProduct(rule.categoryName);
     return {
@@ -1213,6 +1268,11 @@ function sellStock(body, user) {
           product = getProductByCode(code);
           if (!product) throw new AppError(`Không tìm thấy sản phẩm ${code}.`, 404);
           productCache.set(code, product);
+        }
+        if (!saleMainCategoryNames.has(product.category_name)) {
+          throw new AppError(
+            "Phần xuất hàng chỉ cho phép chọn danh mục Giày hoặc Xịt khử mùi."
+          );
         }
         if (
           rawItem?.categoryId !== undefined &&

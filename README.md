@@ -4,16 +4,16 @@
 
 ## Chức năng
 
-- Có sẵn 6 danh mục hàng hóa: Giày, Vớ, Xịt khử mùi, Thùng Carton, Băng keo và Giấy in; có thể thêm danh mục mới ngay trên màn hình Nhập hàng.
-- Thêm hàng hóa theo danh mục với mã sản phẩm, size (bắt buộc cho Giày và Vớ), màu sắc tùy chọn, số lượng, đơn vị, giá nhập, giá bán tùy chọn và ảnh sản phẩm tùy chọn.
-- Đơn vị hàng hóa hỗ trợ: đôi, cái, chai, thùng, cuộn và tờ.
-- Nhập thêm hàng; giá nhập bình quân được cập nhật tự động.
+- Có sẵn 6 danh mục hàng hóa: Giày, Vớ, Xịt khử mùi, Thùng Carton, Băng keo và Giấy in; ô thêm danh mục mới chỉ kích hoạt nút khi đã nhập tên.
+- Biểu mẫu nhập hàng tự thay đổi trường theo danh mục. Size chỉ bắt buộc với Giày; màu sắc, phí vận chuyển, giá bán và hình ảnh chỉ hiện ở những danh mục cần dùng.
+- Đơn vị mặc định được khóa theo danh mục: Giày/Vớ là đôi, Xịt khử mùi là chai, Thùng Carton là thùng, Băng keo là cuộn và Giấy in là sấp.
+- Nhập lại một mã sản phẩm ngay trên cùng biểu mẫu sẽ cộng tồn và cập nhật giá nhập, phí vận chuyển bình quân; không còn màn hình “Bổ sung tồn”.
 - Lịch sử nhập hàng hiển thị sản phẩm, số lượng, đơn giá, người thực hiện và thời gian cập nhật.
-- Xuất nhiều đơn hàng cùng lúc cho một kênh; mỗi mã đơn có thể chứa nhiều sản phẩm chính thuộc 2 danh mục Giày và Xịt khử mùi.
+- Xuất nhiều đơn hàng cùng lúc cho một kênh; luồng chọn theo thứ tự kênh bán → danh mục → mã sản phẩm và hỗ trợ mọi danh mục đang có.
 - Mã đơn mặc định theo mẫu `TAHA-DDMMYYYY-001` và tự tăng theo từng ngày.
 - Đơn Giày tự trừ kho bộ hàng đi kèm cố định: Vớ 9.000đ, Xịt khử mùi 10.000đ, Thùng Carton 8.000đ, Băng keo 1.000đ và 1 tờ giấy in 200đ.
 - Giấy in có thể nhập theo sấp; hệ thống tự quy đổi 1 sấp thành 500 tờ và trừ 1 tờ cho mỗi đơn Giày.
-- Mỗi đơn có phí sàn riêng; giao diện tự quy đổi số tiền phí sang tỷ lệ phần trăm doanh thu.
+- Mỗi đơn có bốn tab tài chính theo đúng thứ tự DOANH THU → PHÍ SÀN → GIÁ VỐN → LỢI NHUẬN. Ô phí sàn nằm ngay trong tab PHÍ SÀN và tự quy đổi số tiền sang tỷ lệ phần trăm doanh thu.
 - Năm trạng thái đơn gồm Đang chờ lấy, Đang vận chuyển, Hoàn thành, Trả hàng và Hủy đơn. Trả/Hủy hoàn kho đúng một lần và đưa doanh thu đơn về 0.
 - Hỗ trợ 6 kênh: Facebook, Zalo, TikTok, Shopee, Website và Lazada.
 - Mỗi sản phẩm chính trong đơn có số lượng và giá bán riêng; sản phẩm đi kèm dùng số lượng, đơn vị và giá vốn cố định, không sửa tại lúc xuất.
@@ -36,6 +36,10 @@
 - Quản lý được nhập hàng, xuất hàng, xem tồn kho và báo cáo nhưng không được quản lý tài khoản.
 
 Số đơn hàng được đếm theo mã đơn duy nhất, không phụ thuộc số dòng sản phẩm. Doanh thu chỉ tính sản phẩm chính. Giá vốn gồm giá nhập cộng phí vận chuyển của sản phẩm chính và toàn bộ giá cố định của hàng đi kèm. Lợi nhuận bằng doanh thu trừ phí sàn và giá vốn.
+
+## Reset dữ liệu của bản cập nhật 03/08/2026
+
+Trong lần khởi động đầu tiên sau khi triển khai bản cập nhật này, hệ thống tự xóa một lần toàn bộ dữ liệu nghiệp vụ cũ gồm danh mục tự tạo, sản phẩm, tồn kho, lịch sử nhập/xuất, đơn hàng, điều chỉnh kho và tài khoản quản lý. Sáu danh mục mặc định được tạo lại từ đầu. Tài khoản admin được giữ nguyên để không làm mất quyền truy cập; mọi phiên đăng nhập cũ sẽ bị đăng xuất. Các lần khởi động sau không reset lại dữ liệu.
 
 ## Công nghệ
 
